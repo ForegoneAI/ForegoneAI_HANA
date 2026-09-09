@@ -38,12 +38,23 @@
       });
     }
 
-    // active link
-    let page = location.pathname.split("/").pop() || "index.html";
-    if (page === "") page = "index.html";
+    // active link — works with extensionless / directory URLs (/hana/, /hana,
+    // /hana/index.html) and with the flat .html files, so nothing breaks if a
+    // page is opened straight off disk.
+    const KEYS = ["hana", "systems", "research", "contact"];
+    const keyOf = (p) => {
+      const seg = String(p || "")
+        .split("#")[0].split("?")[0]
+        .replace(/\/index\.html?$/i, "/")
+        .replace(/\.html?$/i, "")
+        .split("/")
+        .filter((s) => s && s !== "." && s !== "..")
+        .pop();
+      return KEYS.indexOf(seg) >= 0 ? seg : "home";
+    };
+    const page = keyOf(location.pathname);
     $$(".nav__links a, .drawer__links a").forEach((a) => {
-      const href = (a.getAttribute("href") || "").split("/").pop();
-      if (href === page) a.classList.add("is-active");
+      if (keyOf(a.getAttribute("href")) === page) a.classList.add("is-active");
     });
   }
 
@@ -642,15 +653,22 @@
       const band = h - occTop;
       const px = h / (2 * halfH);                       // px per world unit
 
-      const SEAT = 0.445, FILLS = 0.62, ZONE = 0.46;
+      // On a narrow frame the stage collapses to one column, so the copy runs
+      // the full width and a form placed beside it lands on top of the text.
+      // There is no room to the side, so it takes the space below instead:
+      // centred, smaller, and seated under the copy.
+      const NARROW = w < 760;
+      const SEAT  = NARROW ? 0.74 : 0.445;
+      const FILLS = NARROW ? 0.42 : 0.62;
+      const ZONE  = NARROW ? 0.86 : 0.46;
 
-      let cx = r.left + w * 0.74, zoneW = w * ZONE;
+      let cx = r.left + w * (NARROW ? 0.5 : 0.74), zoneW = w * ZONE;
       const wrapEl = cvs.parentElement && cvs.parentElement.querySelector(".wrap");
       if (wrapEl) {
         const wr = wrapEl.getBoundingClientRect();
         const pad = parseFloat(getComputedStyle(wrapEl).paddingLeft) || 0;
         const cl = wr.left + pad, cw = Math.max(wr.width - pad * 2, 1);
-        cx = cl + cw * 0.735;                           // centre of the right half
+        cx = NARROW ? cl + cw * 0.5 : cl + cw * 0.735;   // beside the copy, or under it
         zoneW = cw * ZONE;
       }
       group.position.x = (cx - (r.left + w / 2)) / px;
@@ -757,6 +775,13 @@
 
     const build = (box) => {
       const canvas = $(".cstl__gl", box);
+      /* Below this width the 3-D version is the wrong answer: the labels are
+         absolutely positioned at projected vertices, so on a narrow frame they
+         run off the sides and their hit areas shrink under a fingertip. The
+         no-JS fallback — a plain list with every title and description on the
+         page — is simply better here, so leave it alone. */
+      if (window.innerWidth < 760) return;
+
       const items = $$(".cstl__nodes > li", box);
       const panel = $("[data-panel]", box);
       const spec = CSTL_SHAPES[box.dataset.shape] || CSTL_SHAPES.tetra;

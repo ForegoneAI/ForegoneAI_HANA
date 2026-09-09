@@ -1717,3 +1717,37 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   .rv-line > span { transform: none !important; }
   .grain { animation: none; }
 }
+
+
+/* ==========================================================================
+   Touch
+   Pointer targets sized for a fingertip. On a mouse a 18px-tall footer link is
+   a fine target; on a phone it is a miss waiting to happen, so the links that
+   sit in tight lists get real vertical room rather than a bigger font.
+   ========================================================================== */
+@media (hover: none) and (pointer: coarse) {
+  .foot__links a,
+  .foot__col a,
+  .foot a,
+  .tlink,
+  .deets a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .brand { min-height: 44px; }
+  .filter { min-height: 44px; }
+  .cstl__node { min-height: 44px; display: flex; align-items: center; }
+  .drawer__links a { min-height: 52px; display: flex; align-items: center; }
+}
+
+/* the hero's own breathing room on a phone: the copy sits high so the form
+   below it has somewhere to stand */
+@media (max-width: 760px) {
+  .hero--stage { padding-top: calc(var(--nav-h) + 8px); align-items: start; }
+  .stage { padding-block: clamp(18px, 4vh, 34px) 0; }
+  .stage__copy { padding-top: clamp(8px, 3vh, 28px); }
+  .stage__copy .d1 { font-size: clamp(2rem, 8.4vw, 2.7rem); }
+  .stage__copy .lede { font-size: clamp(.9rem, 3.6vw, 1rem); max-width: 34ch; }
+  .btn-row .btn { width: 100%; justify-content: space-between; }
+}
