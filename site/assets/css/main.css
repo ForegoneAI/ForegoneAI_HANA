@@ -513,6 +513,10 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
    ========================================================================== */
 .hero {
   position: relative;
+  /* svh is the small viewport — the height with Safari's URL bar SHOWING — so
+     the hero never grows taller than the screen and then shrink-jumps when the
+     bar collapses. The vh line before it is the fallback for iOS below 15.4. */
+  min-height: 100vh;
   min-height: 100svh;
   display: flex;
   align-items: flex-end;
@@ -524,7 +528,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
 /* every hero runs the same height, so the copy lands on the same line on every
    page — a shorter sub-page hero leaves its copy floating with dead space under
    it and reads as a different layout */
-.hero--sub { min-height: 100svh; }
+.hero--sub { min-height: 100vh; min-height: 100svh; }
 /* every hero anchors its copy to the bottom-left, so the form has the whole
    upper frame to itself and the two read as one diagonal instead of two blocks
    at the same eye level */
@@ -1750,4 +1754,172 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   .stage__copy .d1 { font-size: clamp(2rem, 8.4vw, 2.7rem); }
   .stage__copy .lede { font-size: clamp(.9rem, 3.6vw, 1rem); max-width: 34ch; }
   .btn-row .btn { width: 100%; justify-content: space-between; }
+}
+
+
+/* ==========================================================================
+   iPhone
+   Everything below is about the shape of the device rather than the width of
+   the window: the notch, the home indicator, and the fact that the pointer is
+   a fingertip.
+   ========================================================================== */
+
+/* The pages declare viewport-fit=cover so the background runs under the
+   rounded corners and the notch. That is only safe if the CONTENT is then held
+   off them, which is what these insets do. max() keeps the normal gutter on
+   every device that has no inset to report. */
+@supports (padding: max(0px)) {
+  .wrap {
+    padding-left:  max(var(--gutter), env(safe-area-inset-left));
+    padding-right: max(var(--gutter), env(safe-area-inset-right));
+  }
+  .nav { padding-top: max(16px, env(safe-area-inset-top)); }
+  .drawer {
+    padding-left:   max(var(--gutter), env(safe-area-inset-left));
+    padding-right:  max(var(--gutter), env(safe-area-inset-right));
+    padding-bottom: max(40px, calc(env(safe-area-inset-bottom) + 24px));
+  }
+  /* 34px is the footer's own padding — the inset can only ADD to it, never
+     replace it, or every device without an inset loses the gap. */
+  .foot { padding-bottom: max(34px, calc(env(safe-area-inset-bottom) + 12px)); }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* Safari paints a hard grey box over any tapped link by default. */
+  a, button, summary, .cstl__node, .filter, .burger {
+    -webkit-tap-highlight-color: rgba(255, 255, 255, .05);
+  }
+  /* Rubber-banding the whole document past an open drawer looks broken. */
+  body.menu-open { overscroll-behavior: none; }
+  .drawer { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  /* A caption that only appears on hover is dead weight on a touch screen. */
+  .cstl.is-3d:not(.is-stacked) .cstl__hint { display: none; }
+}
+
+/* ==========================================================================
+   Constellations — stacked (phones)
+
+   Same scene, different label strategy. The form gets a band of its own at the
+   top of the block and the list runs underneath it in ordinary document flow,
+   so every title and description is readable without a hover and nothing is
+   pinned to a point that is moving. The wiring survives in both directions: a
+   tap on a row lights its vertex, a tap on the form lights its row.
+
+   This lives at the end of the sheet on purpose — it has to outrank both the
+   .is-3d rules above and the touch block, and doing that on source order is
+   more honest than stacking up selectors to win a specificity fight.
+   ========================================================================== */
+/* Source order puts the hint last, after the readout. On desktop it is
+   absolutely positioned into the corner of the frame so that does not matter;
+   here it would strand "tap the form" underneath the list it is describing.
+   Column flex with explicit order puts it back where the instruction is
+   useful — between the object and the rows — without touching the markup. */
+.cstl.is-3d.is-stacked {
+  height: auto;
+  display: flex;
+  flex-direction: column;
+}
+.cstl.is-3d.is-stacked .cstl__gl    { order: 1; }
+.cstl.is-3d.is-stacked .cstl__hint  { order: 2; }
+.cstl.is-3d.is-stacked .cstl__nodes { order: 3; }
+
+.cstl.is-3d.is-stacked .cstl__gl {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: clamp(240px, 40vh, 330px);
+  flex: none;
+  margin-bottom: 10px;
+  /* the object is a tap target here, which it never is on desktop */
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.cstl.is-3d.is-stacked .cstl__nodes {
+  position: static;
+  inset: auto;
+  margin: 0;
+}
+.cstl.is-3d.is-stacked .cstl__nodes > li {
+  position: static;
+  transform: none !important;
+  opacity: 1 !important;
+  z-index: auto !important;
+  will-change: auto;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line-soft);
+  transition: border-color .3s var(--e-out);
+}
+
+/* The label goes back to being a heading. The callout plate above is built for
+   one nowrap line riding the form; wrapped over three on a 390px screen it
+   reads as a rendering fault. */
+.cstl.is-3d.is-stacked .cstl__node {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 44px;             /* a fingertip, not a mouse */
+  padding: 9px 0 9px 34px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  font-family: var(--f-body);
+  font-size: 1.02rem;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  white-space: normal;
+  text-align: left;
+  color: var(--ink);
+  transition: color .3s var(--e-out);
+}
+/* the row's index, mirrored onto the button by the script */
+.cstl.is-3d.is-stacked .cstl__node::before {
+  content: attr(data-k);
+  position: absolute;
+  left: 0;
+  top: 14px;
+  font-family: var(--f-mono);
+  font-size: .6rem;
+  letter-spacing: .18em;
+  color: var(--ink-4);
+  transition: color .3s var(--e-out);
+}
+.cstl.is-3d.is-stacked .cstl__node-b {
+  display: block;
+  padding-left: 34px;
+  margin-top: 2px;
+  font-size: .94rem;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+/* Selected row: a lit index and a lit edge. Inverting the row to a solid block
+   the way the desktop callout does would flood a third of a phone screen. */
+.cstl.is-3d.is-stacked li.is-on { border-bottom-color: var(--ink-2); }
+.cstl.is-3d.is-stacked li.is-on .cstl__node,
+.cstl.is-3d.is-stacked .cstl__node:hover,
+.cstl.is-3d.is-stacked .cstl__node:focus-visible {
+  color: var(--ink);
+  background: none;
+  border: 0;
+  letter-spacing: -0.015em;
+}
+.cstl.is-3d.is-stacked li.is-on .cstl__node::before { color: var(--glow); }
+
+/* The readout duplicates the description, which is already on the page here. */
+.cstl.is-3d.is-stacked .cstl__panel { display: none; }
+
+.cstl.is-3d.is-stacked .cstl__hint {
+  display: block;
+  position: static;
+  margin: 0 0 14px;
+  font-family: var(--f-mono);
+  font-size: .6rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-4);
 }

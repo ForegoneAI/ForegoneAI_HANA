@@ -9,6 +9,36 @@
   const $$ = (s, c) => Array.from((c || document).querySelectorAll(s));
   const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const COARSE  = window.matchMedia("(pointer: coarse)").matches;
+  const NARROW  = () => window.innerWidth < 760;
+
+  /* ----------------------------------------------------------------------
+     One resize listener for every canvas on the page, and one that knows the
+     difference between a real resize and browser chrome.
+
+     Mobile Safari collapses and re-shows its address bar as you scroll, and
+     each of those is a resize event with a different innerHeight. Every canvas
+     here re-fits on resize, so on a phone the artwork jumped and re-seated
+     itself the whole way down the page. A width change is always real —
+     rotation, split view, a desktop window drag. A small height-only change on
+     a touch device is the URL bar, and gets ignored.
+     ---------------------------------------------------------------------- */
+  const RESIZERS = [];
+  const onResize = (fn) => RESIZERS.push(fn);
+  (function () {
+    let t = 0, lw = window.innerWidth, lh = window.innerHeight;
+    window.addEventListener("resize", () => {
+      const w = window.innerWidth, h = window.innerHeight;
+      const chromeOnly = COARSE && w === lw && Math.abs(h - lh) < 140;
+      lw = w; lh = h;
+      if (chromeOnly) return;
+      clearTimeout(t);
+      t = setTimeout(() => { for (let i = 0; i < RESIZERS.length; i++) RESIZERS[i](); }, 180);
+    });
+    window.addEventListener("orientationchange", () => {
+      clearTimeout(t);
+      t = setTimeout(() => { for (let i = 0; i < RESIZERS.length; i++) RESIZERS[i](); }, 260);
+    });
+  })();
 
   /* ======================================================================
      1. Nav — stuck state, drawer, active link
@@ -374,8 +404,7 @@
     }, { passive: true });
     window.addEventListener("mouseout", () => { mouse.x = -9999; mouse.y = -9999; });
 
-    let rt = 0;
-    window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(resize, 180); });
+    onResize(resize);
 
     // pause when offscreen
     if ("IntersectionObserver" in window) {
@@ -413,7 +442,11 @@
     try {
       renderer = new THREE.WebGLRenderer({ canvas: cvs, alpha: true, antialias: true });
     } catch (e) { return; }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    /* A modern iPhone reports a device pixel ratio of 3. Rendering a
+       full-bleed lit scene at 3x is what turns this from an ornament into a
+       space heater, and at this size nobody can see the difference between
+       1.75x and 3x. Desktop keeps 2. */
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, COARSE ? 1.75 : 2));
     // filmic response so the rim can blow out to white without the midtones
     // going chalky — the reference has a very long, very dark falloff
     if (THREE.ACESFilmicToneMapping) {
@@ -689,20 +722,69 @@
        interaction: the crescent travels around the body as you move, so the
        object is read by relighting it rather than by spinning it. */
     const aim = { x: 0, y: 0 }, at = { x: 0, y: 0 };
+    let drifting = COARSE;
+
     if (!COARSE) {
       window.addEventListener("mousemove", (e) => {
         aim.x = (e.clientX / innerWidth) * 2 - 1;
         aim.y = (e.clientY / innerHeight) * 2 - 1;
       }, { passive: true });
+    } else {
+      /* A touch screen has no pointer, and the old code simply skipped this
+         branch — so on a phone the rig stood still and the whole idea of the
+         piece was lost. What you got was one frozen crescent on a black lump.
+
+         Three things stand in for the mouse. Until you do anything, the rig
+         drifts on its own, so the object is alive the moment it appears.
+         Scrolling sweeps the light down the body, which means the animation is
+         driven by the one gesture every visitor makes. And a drag on the hero
+         steers it directly, which is the interaction the desktop has, in the
+         form a phone can offer. */
+      const host = cvs.parentElement || cvs;
+      let dragging = false;
+
+      const steer = (touch) => {
+        const r = cvs.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        aim.x = ((touch.clientX - r.left) / r.width) * 2 - 1;
+        aim.y = ((touch.clientY - r.top) / r.height) * 2 - 1;
+      };
+      host.addEventListener("touchstart", (e) => {
+        if (!e.touches.length) return;
+        dragging = true; drifting = false; steer(e.touches[0]);
+      }, { passive: true });
+      host.addEventListener("touchmove", (e) => {
+        if (dragging && e.touches.length) steer(e.touches[0]);
+      }, { passive: true });
+      const release = () => { dragging = false; };
+      host.addEventListener("touchend", release, { passive: true });
+      host.addEventListener("touchcancel", release, { passive: true });
+
+      window.addEventListener("scroll", () => {
+        if (dragging) return;
+        drifting = false;
+        const span = Math.max(document.documentElement.scrollHeight - innerHeight, 1);
+        const p = Math.min(Math.max((window.scrollY || 0) / span, 0), 1);
+        aim.y = p * 2 - 1;
+        aim.x = Math.sin(p * Math.PI * 2) * 0.8;
+      }, { passive: true });
     }
+
+    /* The body turns a little faster where there is no pointer to turn it. */
+    const SPIN_BASE = COARSE ? 0.00010 : 0.00004;
 
     let running = true, raf = 0;
     function frame(t) {
       raf = 0;
+      // untouched and unscrolled, the rig walks a slow figure of its own
+      if (drifting) {
+        aim.x = Math.sin(t * 0.00021) * 0.75;
+        aim.y = Math.sin(t * 0.00013 + 1.1) * 0.50;
+      }
       at.x += (aim.x - at.x) * 0.045;
       at.y += (aim.y - at.y) * 0.045;
 
-      group.rotation.y = t * 0.00004 + at.x * 0.20;
+      group.rotation.y = t * SPIN_BASE + at.x * 0.20;
       group.rotation.x = at.y * 0.10;
 
       key.position.set(-2.4 + at.x * 3.0, 3.0 - at.y * 2.4, -7.0);
@@ -719,8 +801,7 @@
       if (running) raf = requestAnimationFrame(frame);
     }
 
-    let rt = 0;
-    window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(resize, 180); });
+    onResize(resize);
     window.addEventListener("load", () => resize());
 
     if ("IntersectionObserver" in window) {
@@ -775,12 +856,22 @@
 
     const build = (box) => {
       const canvas = $(".cstl__gl", box);
-      /* Below this width the 3-D version is the wrong answer: the labels are
-         absolutely positioned at projected vertices, so on a narrow frame they
-         run off the sides and their hit areas shrink under a fingertip. The
-         no-JS fallback — a plain list with every title and description on the
-         page — is simply better here, so leave it alone. */
-      if (window.innerWidth < 760) return;
+      /* Two layouts, one scene.
+
+         On a wide frame the labels are pinned to their projected vertices —
+         the form IS the index, and that is the best thing on the page. It
+         cannot survive a phone as written: the labels are absolutely
+         positioned at points on a turning solid, so on a narrow frame they run
+         off the sides and their hit areas shrink under a fingertip.
+
+         The old answer was to drop the 3-D entirely below 760px and fall back
+         to a plain list. That fixed a text-layout problem by deleting the
+         artwork. Stacked mode fixes the text instead: the form keeps its own
+         band at the top, the list runs underneath it in ordinary document flow
+         with every title and description readable, and the two stay wired
+         together — tap a row to light its vertex, tap a vertex to light its
+         row. Nothing is lost but the pinning. */
+      const stacked = NARROW();
 
       const items = $$(".cstl__nodes > li", box);
       const panel = $("[data-panel]", box);
@@ -792,7 +883,9 @@
       try {
         renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
       } catch (e) { return; }
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      // three or four of these live on a page; at an iPhone's 3x that is a
+      // lot of fragments for an object the size of a playing card
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, stacked ? 1.6 : 2));
 
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
@@ -856,7 +949,10 @@
         const path = new THREE.CatmullRomCurve3(
           linePts.filter((_, n) => n % 2 === 0), true, "catmullrom", 0.5
         );
-        group.add(new THREE.Mesh(new THREE.TubeGeometry(path, 520, 0.019, 12, true), filament));
+        group.add(new THREE.Mesh(
+          new THREE.TubeGeometry(path, stacked ? 260 : 520, 0.019, stacked ? 8 : 12, true),
+          filament
+        ));
       } else {
         // one slim cylinder per edge, aimed from vertex to vertex
         const up = new THREE.Vector3(0, 1, 0), dir = new THREE.Vector3();
@@ -864,7 +960,7 @@
           const a2 = linePts[n], b2 = linePts[n + 1];
           const len = a2.distanceTo(b2);
           const tube = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.019, 0.019, len, 12, 1, true), filament
+            new THREE.CylinderGeometry(0.019, 0.019, len, stacked ? 8 : 12, 1, true), filament
           );
           tube.position.copy(a2).add(b2).multiplyScalar(0.5);
           tube.quaternion.setFromUnitVectors(up, dir.copy(b2).sub(a2).normalize());
@@ -903,7 +999,7 @@
       // vertices are polished, not painted — they take a highlight from the rig
       const dots = pos.slice(0, items.length).map((p) => {
         const d = new THREE.Mesh(
-          new THREE.SphereGeometry(0.082, 20, 20),
+          new THREE.SphereGeometry(0.082, stacked ? 14 : 20, stacked ? 14 : 20),
           new THREE.MeshStandardMaterial({
             color: 0xf2f2f2, roughness: 0.12, metalness: 0.5,
             emissive: 0x8f8f8f, emissiveIntensity: 0.55
@@ -942,6 +1038,12 @@
         if (btn && li.dataset.k) btn.setAttribute("data-k", li.dataset.k);
       });
       box.classList.add("is-3d");
+      if (stacked) {
+        box.classList.add("is-stacked");
+        // "Hover a vertex" is advice a phone cannot take
+        const hint = $(".cstl__hint", box);
+        if (hint) hint.textContent = "Tap the form, or a row below";
+      }
 
       /* ---- interaction ---- */
       let active = -1;
@@ -1002,13 +1104,76 @@
       // the form settles while the pointer is inside, so labels stop moving
       // under the cursor and stay clickable
       let spin = 0.0022, spinTo = 0.0022;
-      box.addEventListener("mouseenter", () => { spinTo = 0; });
-      box.addEventListener("mouseleave", () => {
-        spinTo = 0.0022; inside = false; overLabel = -1; overVertex = -1;
-        box.style.cursor = ""; setActive(-1);
-      });
-      box.addEventListener("focusin", () => { spinTo = 0; });
-      box.addEventListener("focusout", () => { spinTo = 0.0022; });
+      if (!stacked) {
+        box.addEventListener("mouseenter", () => { spinTo = 0; });
+        box.addEventListener("mouseleave", () => {
+          spinTo = 0.0022; inside = false; overLabel = -1; overVertex = -1;
+          box.style.cursor = ""; setActive(-1);
+        });
+        box.addEventListener("focusin", () => { spinTo = 0; });
+        box.addEventListener("focusout", () => { spinTo = 0.0022; });
+      } else {
+        /* Touch has no hover, so the form never stops for a cursor and a tap
+           is what selects. A fingertip is far wider than an 0.08-unit dot, so
+           a direct raycast hit is only the first attempt: failing that, the
+           nearest vertex in screen space wins, as long as it is within about a
+           fingertip of where you actually pressed. Tapping empty space clears
+           the selection rather than snapping to something across the frame. */
+        const tv = new THREE.Vector3();
+        let release = 0;
+
+        const tapAt = (clientX, clientY) => {
+          const r = canvas.getBoundingClientRect();
+          if (!r.width || !r.height) return;
+          ndc.x = ((clientX - r.left) / r.width) * 2 - 1;
+          ndc.y = -(((clientY - r.top) / r.height) * 2 - 1);
+
+          ray.setFromCamera(ndc, camera);
+          const direct = ray.intersectObjects(hits, false)[0];
+          let idx = direct ? direct.object.userData.i : -1;
+
+          if (idx < 0) {
+            let best = 1e9;
+            for (let i = 0; i < items.length; i++) {
+              tv.copy(pos[i]).applyMatrix4(group.matrixWorld).project(camera);
+              const dx = (tv.x - ndc.x) * r.width / 2;
+              const dy = (tv.y - ndc.y) * r.height / 2;
+              const d = Math.sqrt(dx * dx + dy * dy);
+              if (d < best) { best = d; idx = i; }
+            }
+            if (best > 60) idx = -1;
+          }
+
+          clearTimeout(release);
+          if (idx < 0) { overLabel = -1; refresh(); spinTo = 0.0022; return; }
+
+          overLabel = idx;
+          refresh();
+          // hold still for a beat so the point you picked stays the point you
+          // are looking at while you read its row
+          spinTo = 0;
+          release = setTimeout(() => { spinTo = 0.0022; }, 2800);
+
+          const li = items[idx];
+          if (li && li.scrollIntoView) li.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        };
+
+        canvas.addEventListener("touchstart", (e) => {
+          if (e.touches.length === 1) tapAt(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: true });
+        // covers a stylus, a trackpad click, and a desktop window dragged narrow
+        canvas.addEventListener("click", (e) => tapAt(e.clientX, e.clientY));
+
+        // picking a row from the list stills the form the same way
+        items.forEach((li) => {
+          const btn = $(".cstl__node", li) || li;
+          btn.addEventListener("click", () => {
+            clearTimeout(release);
+            spinTo = 0;
+            release = setTimeout(() => { spinTo = 0.0022; }, 2800);
+          });
+        });
+      }
 
       /* ---- pointer parallax ---- */
       const mouse = { x: 0, y: 0 }, target = { x: 0, y: 0 };
@@ -1030,7 +1195,10 @@
         if (!w || !h) return;
         renderer.setSize(w, h, false);
         camera.aspect = w / h;
-        camera.position.z = w / h < 1 ? 8.2 : 6.2;
+        // the stacked band is short and wide; back off enough that the form
+        // clears it top and bottom, but no further — it is the whole point of
+        // the block and should fill the space it was given
+        camera.position.z = stacked ? 7.0 : (w / h < 1 ? 8.2 : 6.2);
         camera.updateProjectionMatrix();
       }
 
@@ -1057,6 +1225,10 @@
          SIDE of its vertex a label sits on, with hysteresis so it doesn't
          flicker as the form turns. */
       function place() {
+        /* Stacked mode leaves the list exactly where the document put it.
+           Everything below this line is the pinning, and the pinning is the
+           one thing a narrow frame cannot afford. */
+        if (stacked) return;
         for (let i = 0; i < items.length; i++) {
           v.copy(pos[i]).applyMatrix4(group.matrixWorld).project(camera);
           const x = (v.x * 0.5 + 0.5) * w;
@@ -1124,11 +1296,7 @@
         if (running) raf = requestAnimationFrame(frame);
       }
 
-      let rt = 0;
-      window.addEventListener("resize", () => {
-        clearTimeout(rt);
-        rt = setTimeout(() => { resize(); }, 180);
-      });
+      onResize(resize);
 
       if ("IntersectionObserver" in window) {
         new IntersectionObserver((es) => es.forEach((en) => {
@@ -1151,7 +1319,7 @@
         io.unobserve(en.target);
         build(en.target);
       });
-    }, { rootMargin: "400px 0px" });
+    }, { rootMargin: NARROW() ? "900px 0px" : "400px 0px" });
     boxes.forEach((box) => io.observe(box));
   }
 
@@ -1274,8 +1442,7 @@
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       if (running) raf = requestAnimationFrame(frame);
     }
-    let rt = 0;
-    window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(resize, 180); });
+    onResize(resize);
     if ("IntersectionObserver" in window) {
       new IntersectionObserver((es) => es.forEach((en) => {
         running = en.isIntersecting;
