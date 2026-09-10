@@ -1792,134 +1792,81 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   /* Rubber-banding the whole document past an open drawer looks broken. */
   body.menu-open { overscroll-behavior: none; }
   .drawer { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
-  /* A caption that only appears on hover is dead weight on a touch screen. */
-  .cstl.is-3d:not(.is-stacked) .cstl__hint { display: none; }
 }
 
 /* ==========================================================================
-   Constellations — stacked (phones)
+   Constellations on a narrow frame
 
-   Same scene, different label strategy. The form gets a band of its own at the
-   top of the block and the list runs underneath it in ordinary document flow,
-   so every title and description is readable without a hover and nothing is
-   pinned to a point that is moving. The wiring survives in both directions: a
-   tap on a row lights its vertex, a tap on the form lights its row.
+   Same pinned-label layout as the desktop: every label rides its own vertex,
+   so the object carries its own index. Only the sizing changes, because the
+   desktop plate is a nowrap line built for a 1440px stage and would be a
+   third of a phone wide. Here the plates wrap, the type comes down, and the
+   readout docks to the bottom edge instead of floating beside a label, which
+   on a frame this narrow would cover the other four.
 
-   This lives at the end of the sheet on purpose — it has to outrank both the
-   .is-3d rules above and the touch block, and doing that on source order is
-   more honest than stacking up selectors to win a specificity fight.
+   This sits at the end of the sheet so it outranks the .is-3d rules and the
+   touch block above on source order, which is more honest than stacking up
+   selectors to win a specificity fight.
    ========================================================================== */
-/* Source order puts the hint last, after the readout. On desktop it is
-   absolutely positioned into the corner of the frame so that does not matter;
-   here it would strand "tap the form" underneath the list it is describing.
-   Column flex with explicit order puts it back where the instruction is
-   useful — between the object and the rows — without touching the markup. */
-.cstl.is-3d.is-stacked {
-  height: auto;
-  display: flex;
-  flex-direction: column;
-}
-.cstl.is-3d.is-stacked .cstl__gl    { order: 1; }
-.cstl.is-3d.is-stacked .cstl__hint  { order: 2; }
-.cstl.is-3d.is-stacked .cstl__nodes { order: 3; }
+@media (max-width: 760px) {
+  /* Enough frame to hold five labels apart, but no more: the fit below sizes
+     the form to the WIDTH on a portrait canvas, so extra height buys dead
+     space above and below the object rather than a bigger object. */
+  .cstl.is-3d { height: clamp(400px, 57vh, 560px); }
 
-.cstl.is-3d.is-stacked .cstl__gl {
-  position: relative;
-  inset: auto;
-  width: 100%;
-  height: clamp(240px, 40vh, 330px);
-  flex: none;
-  margin-bottom: 10px;
-  /* the object is a tap target here, which it never is on desktop */
+  .cstl.is-3d .cstl__node {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+    max-width: min(43vw, 158px);
+    padding: 5px 9px;
+    border-left-width: 2px;
+    font-size: .5rem;
+    letter-spacing: .1em;
+    line-height: 1.4;
+    white-space: normal;
+    text-align: left;
+  }
+  .cstl.is-3d li.is-left .cstl__node {
+    border-left-width: 1px;
+    border-right-width: 2px;
+  }
+
+  /* the hint moves to the top of the frame: the readout owns the bottom */
+  .cstl.is-3d .cstl__hint {
+    top: 0;
+    bottom: auto;
+    font-size: .55rem;
+    letter-spacing: .12em;
+  }
+
+  .cstl.is-3d .cstl__panel {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    padding: 13px 15px;
+    transform: none !important;
+  }
+  .cstl.is-3d .cstl__panel .k { margin-bottom: 6px; }
+  .cstl.is-3d .cstl__panel h4 { font-size: .95rem; }
+  .cstl.is-3d .cstl__panel p  { font-size: .86rem; margin-top: 5px; }
+}
+
+/* On touch the form itself is a tap target, so it has to receive the events
+   the desktop version deliberately passes straight through.
+
+   The label list is what stops them getting there. It is an absolutely
+   positioned <ul> stretched over the whole frame, so although it looks like
+   five small plates it is really one full-size sheet, and every tap aimed at
+   the object landed on it instead. Making the sheet transparent to pointers
+   and the plates opaque again leaves each one catching its own taps and the
+   gaps between them falling through to the form, which is what it looks like
+   should happen. */
+.cstl.is-3d.is-narrow .cstl__gl {
   pointer-events: auto;
   touch-action: manipulation;
 }
-
-.cstl.is-3d.is-stacked .cstl__nodes {
-  position: static;
-  inset: auto;
-  margin: 0;
-}
-.cstl.is-3d.is-stacked .cstl__nodes > li {
-  position: static;
-  transform: none !important;
-  opacity: 1 !important;
-  z-index: auto !important;
-  will-change: auto;
-  padding: 13px 0;
-  border-bottom: 1px solid var(--line-soft);
-  transition: border-color .3s var(--e-out);
-}
-
-/* The label goes back to being a heading. The callout plate above is built for
-   one nowrap line riding the form; wrapped over three on a 390px screen it
-   reads as a rendering fault. */
-.cstl.is-3d.is-stacked .cstl__node {
-  position: relative;
-  display: block;
-  width: 100%;
-  min-height: 44px;             /* a fingertip, not a mouse */
-  padding: 9px 0 9px 34px;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  font-family: var(--f-body);
-  font-size: 1.02rem;
-  font-weight: 500;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
-  text-transform: none;
-  white-space: normal;
-  text-align: left;
-  color: var(--ink);
-  transition: color .3s var(--e-out);
-}
-/* the row's index, mirrored onto the button by the script */
-.cstl.is-3d.is-stacked .cstl__node::before {
-  content: attr(data-k);
-  position: absolute;
-  left: 0;
-  top: 14px;
-  font-family: var(--f-mono);
-  font-size: .6rem;
-  letter-spacing: .18em;
-  color: var(--ink-4);
-  transition: color .3s var(--e-out);
-}
-.cstl.is-3d.is-stacked .cstl__node-b {
-  display: block;
-  padding-left: 34px;
-  margin-top: 2px;
-  font-size: .94rem;
-  line-height: 1.55;
-  color: var(--ink-3);
-}
-
-/* Selected row: a lit index and a lit edge. Inverting the row to a solid block
-   the way the desktop callout does would flood a third of a phone screen. */
-.cstl.is-3d.is-stacked li.is-on { border-bottom-color: var(--ink-2); }
-.cstl.is-3d.is-stacked li.is-on .cstl__node,
-.cstl.is-3d.is-stacked .cstl__node:hover,
-.cstl.is-3d.is-stacked .cstl__node:focus-visible {
-  color: var(--ink);
-  background: none;
-  border: 0;
-  letter-spacing: -0.015em;
-}
-.cstl.is-3d.is-stacked li.is-on .cstl__node::before { color: var(--glow); }
-
-/* The readout duplicates the description, which is already on the page here. */
-.cstl.is-3d.is-stacked .cstl__panel { display: none; }
-
-.cstl.is-3d.is-stacked .cstl__hint {
-  display: block;
-  position: static;
-  margin: 0 0 14px;
-  font-family: var(--f-mono);
-  font-size: .6rem;
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  color: var(--ink-4);
-}
+.cstl.is-3d.is-narrow .cstl__nodes { pointer-events: none; }
+.cstl.is-3d.is-narrow .cstl__node  { pointer-events: auto; }

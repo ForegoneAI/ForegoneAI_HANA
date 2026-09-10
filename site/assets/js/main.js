@@ -856,22 +856,19 @@
 
     const build = (box) => {
       const canvas = $(".cstl__gl", box);
-      /* Two layouts, one scene.
+      /* One layout, two scales.
 
-         On a wide frame the labels are pinned to their projected vertices —
-         the form IS the index, and that is the best thing on the page. It
-         cannot survive a phone as written: the labels are absolutely
-         positioned at points on a turning solid, so on a narrow frame they run
-         off the sides and their hit areas shrink under a fingertip.
+         The labels ride the form's vertices on every screen: the object
+         carries its own index, and that pairing is the whole idea. What a
+         390px frame cannot take is the DESKTOP LABEL — a nowrap plate built
+         for a 1440px stage is a third of a phone wide, so pinned near an edge
+         it hangs off the screen.
 
-         The old answer was to drop the 3-D entirely below 760px and fall back
-         to a plain list. That fixed a text-layout problem by deleting the
-         artwork. Stacked mode fixes the text instead: the form keeps its own
-         band at the top, the list runs underneath it in ordinary document flow
-         with every title and description readable, and the two stay wired
-         together — tap a row to light its vertex, tap a vertex to light its
-         row. Nothing is lost but the pinning. */
-      const stacked = NARROW();
+         So nothing here is switched off for narrow. The plates get smaller and
+         wrap, place() holds each one inside the canvas instead of letting it
+         travel off the edge, and the readout docks to the bottom of the frame
+         rather than floating beside a label it would cover. */
+      const narrow = NARROW();
 
       const items = $$(".cstl__nodes > li", box);
       const panel = $("[data-panel]", box);
@@ -885,7 +882,7 @@
       } catch (e) { return; }
       // three or four of these live on a page; at an iPhone's 3x that is a
       // lot of fragments for an object the size of a playing card
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, stacked ? 1.6 : 2));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, narrow ? 1.6 : 2));
 
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
@@ -950,7 +947,7 @@
           linePts.filter((_, n) => n % 2 === 0), true, "catmullrom", 0.5
         );
         group.add(new THREE.Mesh(
-          new THREE.TubeGeometry(path, stacked ? 260 : 520, 0.019, stacked ? 8 : 12, true),
+          new THREE.TubeGeometry(path, narrow ? 260 : 520, 0.019, narrow ? 8 : 12, true),
           filament
         ));
       } else {
@@ -960,7 +957,7 @@
           const a2 = linePts[n], b2 = linePts[n + 1];
           const len = a2.distanceTo(b2);
           const tube = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.019, 0.019, len, stacked ? 8 : 12, 1, true), filament
+            new THREE.CylinderGeometry(0.019, 0.019, len, narrow ? 8 : 12, 1, true), filament
           );
           tube.position.copy(a2).add(b2).multiplyScalar(0.5);
           tube.quaternion.setFromUnitVectors(up, dir.copy(b2).sub(a2).normalize());
@@ -999,7 +996,7 @@
       // vertices are polished, not painted — they take a highlight from the rig
       const dots = pos.slice(0, items.length).map((p) => {
         const d = new THREE.Mesh(
-          new THREE.SphereGeometry(0.082, stacked ? 14 : 20, stacked ? 14 : 20),
+          new THREE.SphereGeometry(0.082, narrow ? 14 : 20, narrow ? 14 : 20),
           new THREE.MeshStandardMaterial({
             color: 0xf2f2f2, roughness: 0.12, metalness: 0.5,
             emissive: 0x8f8f8f, emissiveIntensity: 0.55
@@ -1038,15 +1035,21 @@
         if (btn && li.dataset.k) btn.setAttribute("data-k", li.dataset.k);
       });
       box.classList.add("is-3d");
-      if (stacked) {
-        box.classList.add("is-stacked");
+      if (narrow) {
+        box.classList.add("is-narrow");
         // "Hover a vertex" is advice a phone cannot take
         const hint = $(".cstl__hint", box);
-        if (hint) hint.textContent = "Tap the form, or a row below";
+        if (hint) hint.textContent = "Tap a point to read it";
       }
 
       /* ---- interaction ---- */
       let active = -1;
+      /* Which label a tap has already opened. The link guard below cannot ask
+         `active` instead: tapping an <a> focuses it, focus opens the readout,
+         and by the time the click handler runs the label is already active —
+         so every first tap would look like a second one and navigate. Only a
+         real tap writes this. */
+      let tapped = -1;
       function setActive(i) {
         if (active === i) return;
         active = i;
@@ -1086,12 +1089,31 @@
         // the pointer target is the whole ROW, because the row is what
         // highlights — binding this to the button alone left most of the
         // highlighted area dead, including the number and the description
-        btn.addEventListener("mouseenter", () => { overLabel = i; refresh(); });
-        btn.addEventListener("mouseleave", () => { if (overLabel === i) { overLabel = -1; refresh(); } });
+        /* Hover is a mouse idea, and a touch screen fakes it badly: tapping a
+           label makes Safari fire mouseenter AND, a moment later, mouseleave,
+           so a selection made by tapping was being cancelled by the browser's
+           own compatibility events before you could read it. Worse, the fake
+           mouseenter set the row active, which made the second-tap link guard
+           below think the first tap had already happened.
+
+           So on touch these are simply not bound. A tap is a click, and click
+           is the one event that means the same thing on both. */
+        if (!narrow) {
+          btn.addEventListener("mouseenter", () => { overLabel = i; refresh(); });
+          btn.addEventListener("mouseleave", () => { if (overLabel === i) { overLabel = -1; refresh(); } });
+          btn.addEventListener("blur", () => { if (overLabel === i) { overLabel = -1; refresh(); } });
+        }
         btn.addEventListener("focus", () => { overLabel = i; refresh(); });
-        btn.addEventListener("blur", () => { if (overLabel === i) { overLabel = -1; refresh(); } });
         btn.addEventListener("click", (e) => {
-          if (btn.tagName !== "A") { e.preventDefault(); overLabel = i; refresh(); }
+          if (btn.tagName !== "A") { e.preventDefault(); overLabel = i; refresh(); return; }
+          /* A label that is also a link has to do on one tap what a mouse
+             splits between hover and click. First tap reads it, second tap
+             follows it — otherwise the description behind the readout could
+             never be read at all, because the first touch would navigate. */
+          if (narrow && tapped !== i) {
+            e.preventDefault();
+            tapped = i; overLabel = i; refresh();
+          }
         });
       });
 
@@ -1103,15 +1125,19 @@
       });
       // the form settles while the pointer is inside, so labels stop moving
       // under the cursor and stay clickable
-      let spin = 0.0022, spinTo = 0.0022;
-      if (!stacked) {
+      /* The form turns more slowly on a phone. At desktop speed the labels
+         are legible because a cursor stops them; with nothing to stop them,
+         five plates sweeping a 390px frame is just motion. */
+      const SPIN = narrow ? 0.0011 : 0.0022;
+      let spin = SPIN, spinTo = SPIN;
+      if (!narrow) {
         box.addEventListener("mouseenter", () => { spinTo = 0; });
         box.addEventListener("mouseleave", () => {
-          spinTo = 0.0022; inside = false; overLabel = -1; overVertex = -1;
+          spinTo = SPIN; inside = false; overLabel = -1; overVertex = -1;
           box.style.cursor = ""; setActive(-1);
         });
         box.addEventListener("focusin", () => { spinTo = 0; });
-        box.addEventListener("focusout", () => { spinTo = 0.0022; });
+        box.addEventListener("focusout", () => { spinTo = SPIN; });
       } else {
         /* Touch has no hover, so the form never stops for a cursor and a tap
            is what selects. A fingertip is far wider than an 0.08-unit dot, so
@@ -1145,17 +1171,17 @@
           }
 
           clearTimeout(release);
-          if (idx < 0) { overLabel = -1; refresh(); spinTo = 0.0022; return; }
+          if (idx < 0) { overLabel = -1; tapped = -1; refresh(); spinTo = SPIN; return; }
 
+          // reading a point counts as reading its label, so a following tap
+          // on that label's plate follows the link instead of re-opening it
+          tapped = idx;
           overLabel = idx;
           refresh();
           // hold still for a beat so the point you picked stays the point you
           // are looking at while you read its row
           spinTo = 0;
-          release = setTimeout(() => { spinTo = 0.0022; }, 2800);
-
-          const li = items[idx];
-          if (li && li.scrollIntoView) li.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          release = setTimeout(() => { spinTo = SPIN; }, 2800);
         };
 
         canvas.addEventListener("touchstart", (e) => {
@@ -1164,13 +1190,14 @@
         // covers a stylus, a trackpad click, and a desktop window dragged narrow
         canvas.addEventListener("click", (e) => tapAt(e.clientX, e.clientY));
 
-        // picking a row from the list stills the form the same way
+        // tapping the label itself stills the form the same way a tap on
+        // its vertex does
         items.forEach((li) => {
           const btn = $(".cstl__node", li) || li;
           btn.addEventListener("click", () => {
             clearTimeout(release);
             spinTo = 0;
-            release = setTimeout(() => { spinTo = 0.0022; }, 2800);
+            release = setTimeout(() => { spinTo = SPIN; }, 2800);
           });
         });
       }
@@ -1188,6 +1215,42 @@
         }, { passive: true });
       }
 
+      /* Clamping a label needs its box, and asking the DOM for offsetWidth
+         inside the frame loop would force a synchronous layout per label per
+         frame. So the boxes are cached — but caching them ONCE at build time
+         is wrong, and quietly so: the labels are still settling then, and the
+         clamp spent the rest of its life working from numbers ~20px short,
+         which looks exactly like no clamp at all near the edges.
+
+         A ResizeObserver is the honest version. It reports each label's box
+         whenever it actually changes — a webfont arriving, a rotation, a
+         reflow — and its callback runs after layout, so reading the size
+         there costs nothing. */
+      const lsize = items.map(() => ({ w: 0, h: 0 }));
+      function measureLabels() {
+        for (let i = 0; i < items.length; i++) {
+          lsize[i].w = items[i].offsetWidth;
+          lsize[i].h = items[i].offsetHeight;
+        }
+      }
+      if (typeof ResizeObserver === "function") {
+        const ro = new ResizeObserver((entries) => {
+          for (let n = 0; n < entries.length; n++) {
+            const en = entries[n];
+            const i = items.indexOf(en.target);
+            if (i < 0) continue;
+            const bb = en.borderBoxSize && en.borderBoxSize[0];
+            lsize[i].w = bb ? bb.inlineSize : en.target.offsetWidth;
+            lsize[i].h = bb ? bb.blockSize  : en.target.offsetHeight;
+          }
+        });
+        items.forEach((li) => ro.observe(li));
+      } else {
+        // no observer: measure now, and once more after the page has settled
+        setTimeout(measureLabels, 0);
+        setTimeout(measureLabels, 1500);
+      }
+
       let w = 0, h = 0;
       function resize() {
         const r = canvas.getBoundingClientRect();
@@ -1195,11 +1258,20 @@
         if (!w || !h) return;
         renderer.setSize(w, h, false);
         camera.aspect = w / h;
-        // the stacked band is short and wide; back off enough that the form
-        // clears it top and bottom, but no further — it is the whole point of
-        // the block and should fill the space it was given
-        camera.position.z = stacked ? 7.0 : (w / h < 1 ? 8.2 : 6.2);
+        /* A phone frame is tall and thin, and one fixed distance cannot
+           serve every aspect — tuned for the tablet case it crops the form
+           off both sides of a 337x574 canvas. So narrow fits the armature's
+           own reach to whichever axis is tighter, and adds a margin, because
+           the labels pinned around the form need frame to sit in. */
+        if (narrow) {
+          const tan = Math.tan((camera.fov * Math.PI / 180) / 2);
+          const reach = (spec.curve ? (spec.radius || 1.85) * 1.5 : R) + 0.12;
+          camera.position.z = (reach * 1.08) / (tan * Math.min(1, w / h));
+        } else {
+          camera.position.z = w / h < 1 ? 8.2 : 6.2;
+        }
         camera.updateProjectionMatrix();
+        measureLabels();
       }
 
       // project each vertex to screen space and park its label there
@@ -1225,10 +1297,6 @@
          SIDE of its vertex a label sits on, with hysteresis so it doesn't
          flicker as the form turns. */
       function place() {
-        /* Stacked mode leaves the list exactly where the document put it.
-           Everything below this line is the pinning, and the pinning is the
-           one thing a narrow frame cannot afford. */
-        if (stacked) return;
         for (let i = 0; i < items.length; i++) {
           v.copy(pos[i]).applyMatrix4(group.matrixWorld).project(camera);
           const x = (v.x * 0.5 + 0.5) * w;
@@ -1239,17 +1307,37 @@
           const rel = x / w - 0.5;
           if (rel > 0.05) sides[i] = 1; else if (rel < -0.05) sides[i] = -1;
 
-          const off = x + sides[i] * 16;
+          let off = x + sides[i] * 16;
+          let ly = y;
+
+          /* A label whose vertex has turned to the edge of a phone frame would
+             hang half off the screen. It keeps its side and its vertical line;
+             it just stops travelling at the wall. Desktop has the room and is
+             left exactly as it was. */
+          if (narrow) {
+            const lw = lsize[i].w, lh = lsize[i].h, M = 4;
+            if (sides[i] < 0) off = Math.min(Math.max(off, lw + M), w - M);
+            else              off = Math.max(Math.min(off, w - lw - M), M);
+            ly = Math.min(Math.max(y, lh / 2 + M), h - lh / 2 - M);
+          }
+
           li.style.transform =
             (sides[i] < 0 ? "translate(-100%,-50%) " : "translate(0,-50%) ") +
-            "translate(" + off.toFixed(1) + "px," + y.toFixed(1) + "px)";
+            "translate(" + off.toFixed(1) + "px," + ly.toFixed(1) + "px)";
           li.classList.toggle("is-left", sides[i] < 0);
           // depth does the ordering: a label in front of the form covers one
           // behind it, which is the natural way to read two that coincide
-          li.style.opacity = (1 - depth * 0.5).toFixed(2);
-          li.style.zIndex = String(100 - Math.round(depth * 100));
+          /* Depth fades a label as it travels behind the form, which reads
+             correctly right up until the faded one is the label you just
+             selected: its lit plate arrives at half opacity and the inverted
+             text goes muddy. The active label is the answer to a question the
+             reader just asked, so it comes forward whatever its depth. */
+          const lifted = narrow && i === active;
+          li.style.opacity = lifted ? "1" : (1 - depth * 0.5).toFixed(2);
+          li.style.zIndex = lifted ? "150" : String(100 - Math.round(depth * 100));
 
-          if (i === active && panel) {
+          // narrow docks the readout to the bottom edge in CSS instead
+          if (i === active && panel && !narrow) {
             const pw = panel.offsetWidth, ph = panel.offsetHeight;
             let px = x + sides[i] * 26;
             if (sides[i] < 0) px -= pw;
