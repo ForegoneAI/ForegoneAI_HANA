@@ -1,88 +1,153 @@
 # ForegoneAI — HANA
 
-Static front-end for ForegoneAI and its flagship intelligence platform, HANA.
-No build step, no dependencies, no framework. Plain HTML, CSS and JavaScript.
-
-## Run it
-
-Fonts and videos need to be served over HTTP — opening `index.html` straight from
-the filesystem will fall back to system fonts. From this folder:
+Static site. No build step, no package manager, no framework — plain HTML, CSS
+and one JS file, plus a bundled Three.js. What you edit is what ships.
 
 ```bash
-python3 -m http.server 8000     # then open http://localhost:8000
-# or
-npx serve .
+cd site && python3 -m http.server 8000     # http://localhost:8000
 ```
+
+Serve over HTTP; opening `index.html` from the filesystem breaks fonts and links.
+
+---
 
 ## Deploy
 
-Upload the contents of this folder to any static host — GitHub Pages, Netlify,
-Vercel, Cloudflare Pages, S3. There is nothing to compile.
+Live at **foregone.ai** from **ForegoneAI/ForegoneAI_HANA**, branch `master`.
 
-For GitHub Pages, push this folder as the repo root (or `/docs`) and add an empty
-`.nojekyll` file so the `assets/` directory is served verbatim.
+`.github/workflows/static.yml` (repo root, one level up) publishes `./site`
+verbatim to GitHub Pages on every push. The empty `.nojekyll` is what stops
+Pages hiding `assets/`. Custom domain is set under **Settings → Pages**; DNS for
+`foregone.ai` and `www` points at `foregoneai.github.io`.
 
-## Structure
+No local git clone — this folder is uploaded through the GitHub web UI. Making
+it a real clone would turn deploys into one command.
+
+## URLs
+
+Five pages, each a directory, so URLs carry no extension:
 
 ```
-index.html        Home — hero, why we exist, HANA, systems, approach, partners
-company.html      Why ForegoneAI exists, built from inside the work, the approach
-hana.html         The platform, what HANA does, how HANA approaches intelligence
-systems.html      H9N · H1S · H5B, future systems
-future.html       Long-term areas of interest, deliberate expansion
-careers.html      Who we're interested in, how we work
-contact.html      Contact details + inquiry form
-
-assets/css/main.css   Design tokens + every component
-assets/js/main.js     Motion layer (see below)
-assets/fonts/         Parkinsans, Onest, Darker Grotesque (variable, OFL)
-assets/img/           WebP, 1920w + 960w + poster frames
-assets/video/         MP4 + WebM, ~1 MB each
+index.html        →  foregone.ai/
+hana/index.html   →  foregone.ai/hana/
+systems/          research/          contact/
 ```
 
-## Design system
+Internal links are relative, so the site also works from a subpath.
 
-Everything is driven by custom properties at the top of `main.css`.
+The pre-migration flat URLs (`/hana.html` and friends) previously had redirect
+stubs here. They have been removed, so those URLs now 404. The stubs are kept in
+`../unused/redirect-stubs/` if any turn out to still be linked.
+
+## Layout
+
+```
+index.html  hana/  systems/  research/  contact/   the five pages
+.nojekyll                                          serve assets/ verbatim
+assets/css/main.css      1.9k lines - tokens + every component
+assets/js/main.js        1.5k lines - all behaviour, one IIFE
+assets/js/vendor/        three.min.js (bundled, no CDN) + its licence
+assets/fonts/            3 variable fonts + their OFL licences
+assets/img/              5 files, all of them metadata (see below)
+```
+
+Total 1.3 MB, of which Three.js is 592 KB and the fonts 200 KB.
+
+Excess files and resources  provided by the ForegoneAI team — is in `../unused/`, outside the published
+folder. Nothing here references it.
+
+---
+
+## Design tokens
+
+Top of `main.css`. Change a token, it propagates.
 
 | Token | Value | Use |
 |---|---|---|
-| `--bg` | `#08070A` | Page base |
-| `--amber` | `#E8963A` | Primary accent |
-| `--amber-hot` / `--amber-soft` | `#FF7A2F` / `#F4C67A` | Gradient ends |
-| `--dusk-teal` / `--dusk-rose` | `#79C3BD` / `#E5A3AE` | Secondary accents |
-| `--ink` → `--ink-4` | `#EDE8E1` → `#55504B` | Text ramp |
+| `--bg` | `#060607` | Page base |
+| `--bg-1` / `--bg-2` / `--bg-raise` | `#0A0A0C` / `#0E0E11` / `#141417` | Raised surfaces |
+| `--ink` → `--ink-4` | `#F4F5F6` → `#45484E` | Text ramp |
+| `--line` / `--line-soft` | 8.5% / 4.5% white | Borders |
+| `--glow` | `#FFFFFF` | Accent, highlights, focus |
+| `--gutter` / `--maxw` / `--nav-h` | `clamp(22px,6.8vw,96px)` / `1400px` / `74px` | Page metrics |
 
-Type: **Parkinsans** for display, **Onest** for body and UI, **Darker Grotesque**
-for oversized statement lines. All three are variable fonts under the SIL Open
-Font License (see `assets/fonts/OFL-*.txt`).
+**The palette is monochrome.** `--amber`, `--dusk-teal` and `--dusk-rose` are
+left over from a warm palette and now hold greys (`--amber` is `#E6E6E6`). The
+names are vestigial — don't read colour into them.
 
-## Motion layer
+Type: Parkinsans (display), Onest (body/UI), Darker Grotesque (statement lines),
+all local variable fonts under the OFL. One external dependency: JetBrains Mono
+from Google Fonts for small caps labels; falls back to system mono if blocked.
 
-`assets/js/main.js` is a single IIFE with fourteen independent modules — sticky
-nav, scroll progress, reveal-on-scroll, hero line reveal, custom cursor, parallax,
-card pointer glow, count-up, the network canvas, a WebGL amber field, visibility-
-gated video playback, marquee, form handling and the year stamp.
+## Imagery
 
-Markup hooks:
+**There are no `<img>` tags on this site.** Every visual is drawn at runtime —
+WebGL objects, canvas, CSS. The five files in `assets/img/` are metadata only:
+`favicon.svg` and `apple-touch-icon.png` on every page, plus three `og:image`
+social previews (`hero-sphere-poster.webp` for home/hana/research,
+`villa-dusk.webp` for systems, `extra-2.webp` for contact).
+
+If you add real imagery, note that nothing here uses `srcset` yet.
+
+---
+
+## Behaviour (`assets/js/main.js`)
+
+One IIFE, one module per effect, each a no-op when its hook is absent. Order set
+by `init()`: `nav`, `progress`, `reveals`, `heroLines`, `decode`, `cardGlow`,
+`heroForm`, `constellations`, `field`, `marquee`, `forms`, `insightFilters`,
+`year`.
 
 | Attribute | Effect |
 |---|---|
-| `data-rv` | Reveal on scroll. Values: `fade`, `left`, `right`, `scale`, `clip` |
-| `data-rv-delay="0.2"` | Delay in seconds |
-| `data-rv-stagger="0.07"` | On a parent — auto-delays its `[data-rv]` children |
-| `data-para="0.08"` | Parallax; higher = more travel |
-| `data-net` | Renders the node-network canvas (hero) |
-| `data-field` | Renders the WebGL dusk field (CTA) |
-| `data-auto` | Video plays only while on screen |
-| `data-count="12"` | Counts up when scrolled into view |
+| `data-rv` / `data-rv-delay` / `data-rv-stagger` | Reveal on scroll; delay in seconds; auto-delay children |
+| `data-scramble` | Headline decodes out of noise once, on arrival |
+| `data-gl` | Hero object: `orb`, `knot`, `lattice`, `meridian`, `portal` |
+| `data-cstl` + `data-shape` | Diagram: `tetra`, `octa`, `ring`, `knot`, `knotAlt` |
+| `data-panel` | Readout box inside a `data-cstl` block |
+| `data-field` | WebGL field behind the closing CTA |
+| `data-filter` / `data-cat` | Research index filtering |
+| `data-form` / `data-year` | Contact form; year stamp |
 
-Every effect is skipped under `prefers-reduced-motion: reduce`, and the WebGL
-field silently no-ops when the context is unavailable.
+**The constellation `<ul>` is the real content and the fallback.** Without JS or
+WebGL it renders as a plain list with every title and description visible. Worth
+keeping that way.
 
-## Before launch
+---
 
-- The contact form is front-end only. Point `form[data-form]` at your mail
-  service or CRM endpoint in `forms()` (`main.js`).
-- Placeholder addresses in `contact.html` use `@foregoneai.com` — swap for real
-  inboxes.
-- Add real `og:image` artwork sized 1200×630 if you want richer link previews.
+## Phone vs desktop
+
+Two gates: `NARROW()` (viewport under 760px) and `COARSE` (touch screen).
+Desktop matches neither and is byte-identical to the pre-mobile version across
+five pages at 1440/1280/1024.
+
+Under 760px: labels are clamped inside the canvas (sizes from a
+`ResizeObserver`, not a one-time measure); the camera fits the form to whichever
+axis is tighter; the readout docks to the bottom edge instead of floating; tap
+replaces hover, and hover handlers are **not bound at all** on touch, because
+Safari's fake `mouseenter`/`mouseleave` pair cancels a tap-selection before it
+can be read. Link labels take two taps — read, then follow. Pixel ratio is
+capped at 1.75 (hero) / 1.6 (constellations) against an iPhone's native 3.
+
+On iOS at any width: `viewport-fit=cover` plus `env(safe-area-inset-*)`, always
+as `max(original, env(...))` — reversing that silently zeroes the padding on
+every device without an inset. One shared resize listener ignores height-only
+changes under 140px, since Safari's collapsing URL bar fires a resize on every
+scroll and re-fitting made the artwork jump.
+
+`prefers-reduced-motion: reduce` skips every canvas; content stays complete. A
+refused WebGL context degrades to the plain list. Scrambled headlines keep their
+wording in `aria-label`; the readout is `aria-live="polite"`.
+
+---
+
+## Gotchas
+
+- **The contact form is front-end only.** It validates, fakes a send, shows
+  success. Point `forms()` at a real endpoint before relying on it.
+- **Mobile/desktop mode is decided at page load** — dragging a desktop window
+  across 760px needs a reload. Never affects a real phone.
+- **`main.css` still carries rules for components no longer in the markup**
+  (roughly 40 class names, from pages that were removed). Harmless, but it is
+  the next thing to prune if the stylesheet starts feeling unwieldy. Verify each
+  by hand — an automated sweep produces false positives.

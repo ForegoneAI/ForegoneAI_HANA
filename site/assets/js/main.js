@@ -236,29 +236,6 @@
     });
   }
 
-  /* ======================================================================
-     5. Parallax
-     ====================================================================== */
-  function parallax() {
-    if (REDUCED) return;
-    const items = $$("[data-para]");
-    if (!items.length) return;
-    let raf = 0;
-    const run = () => {
-      raf = 0;
-      const vh = innerHeight;
-      items.forEach((el) => {
-        const r = el.getBoundingClientRect();
-        if (r.bottom < -200 || r.top > vh + 200) return;
-        const speed = parseFloat(el.dataset.para) || 0.12;
-        const mid = r.top + r.height / 2 - vh / 2;
-        el.style.transform = `translate3d(0, ${(-mid * speed).toFixed(2)}px, 0) scale(1.12)`;
-      });
-    };
-    window.addEventListener("scroll", () => { if (!raf) raf = requestAnimationFrame(run); }, { passive: true });
-    window.addEventListener("resize", run);
-    run();
-  }
 
   /* ======================================================================
      6. Card pointer glow
@@ -274,151 +251,6 @@
     });
   }
 
-  /* ======================================================================
-     7. Count-up numbers
-     ====================================================================== */
-  function counters() {
-    const els = $$("[data-count]");
-    if (!els.length) return;
-    if (REDUCED || !("IntersectionObserver" in window)) {
-      els.forEach((e) => (e.textContent = e.dataset.count));
-      return;
-    }
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach((en) => {
-        if (!en.isIntersecting) return;
-        const el = en.target;
-        io.unobserve(el);
-        const end = parseFloat(el.dataset.count);
-        const dec = (el.dataset.count.split(".")[1] || "").length;
-        const dur = 1500;
-        const t0 = performance.now();
-        const step = (t) => {
-          const p = Math.min((t - t0) / dur, 1);
-          const e = 1 - Math.pow(1 - p, 3);
-          el.textContent = (end * e).toFixed(dec);
-          if (p < 1) requestAnimationFrame(step);
-        };
-        requestAnimationFrame(step);
-      });
-    }, { threshold: 0.5 });
-    els.forEach((e) => io.observe(e));
-  }
-
-  /* ======================================================================
-     8. Network canvas — the "Human-Aligned Network" motif
-     ====================================================================== */
-  function network() {
-    const cvs = $("[data-net]");
-    if (!cvs || REDUCED) return;
-    const ctx = cvs.getContext("2d");
-    if (!ctx) return;
-
-    let w = 0, h = 0, dpr = 1, nodes = [], raf = 0, running = true;
-    const mouse = { x: -9999, y: -9999 };
-
-    function resize() {
-      const r = cvs.getBoundingClientRect();
-      dpr = Math.min(devicePixelRatio || 1, 2);
-      w = r.width; h = r.height;
-      cvs.width = Math.max(1, Math.floor(w * dpr));
-      cvs.height = Math.max(1, Math.floor(h * dpr));
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      seed();
-    }
-
-    function seed() {
-      const target = Math.round(Math.min(120, Math.max(34, (w * h) / 15000)));
-      nodes = [];
-      for (let i = 0; i < target; i++) {
-        nodes.push({
-          x: Math.random() * w,
-          y: Math.random() * h,
-          vx: (Math.random() - 0.5) * 0.22,
-          vy: (Math.random() - 0.5) * 0.22,
-          r: Math.random() * 1.5 + 0.6,
-          p: Math.random() * Math.PI * 2,
-        });
-      }
-    }
-
-    const LINK = 132;
-
-    function draw(t) {
-      raf = 0;
-      ctx.clearRect(0, 0, w, h);
-
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        n.x += n.vx; n.y += n.vy;
-        if (n.x < -20) n.x = w + 20; else if (n.x > w + 20) n.x = -20;
-        if (n.y < -20) n.y = h + 20; else if (n.y > h + 20) n.y = -20;
-
-        // gentle pull toward pointer
-        const dx = mouse.x - n.x, dy = mouse.y - n.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < 34000 && d2 > 1) {
-          const f = (1 - d2 / 34000) * 0.014;
-          n.vx += dx * f * 0.05;
-          n.vy += dy * f * 0.05;
-        }
-        n.vx *= 0.994; n.vy *= 0.994;
-        const sp = Math.hypot(n.vx, n.vy);
-        if (sp > 0.5) { n.vx *= 0.5 / sp; n.vy *= 0.5 / sp; }
-      }
-
-      // links
-      ctx.lineWidth = 0.65;
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i], b = nodes[j];
-          const dx = a.x - b.x, dy = a.y - b.y;
-          const d = Math.hypot(dx, dy);
-          if (d > LINK) continue;
-          const o = (1 - d / LINK) * 0.3;
-          ctx.strokeStyle = `rgba(255,255,255,${o.toFixed(3)})`;
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.stroke();
-        }
-      }
-
-      // nodes
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        const tw = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * 0.0012 + n.p));
-        ctx.fillStyle = `rgba(255,255,255,${(0.5 * tw).toFixed(3)})`;
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      if (running) raf = requestAnimationFrame(draw);
-    }
-
-    window.addEventListener("mousemove", (e) => {
-      const r = cvs.getBoundingClientRect();
-      mouse.x = e.clientX - r.left;
-      mouse.y = e.clientY - r.top;
-    }, { passive: true });
-    window.addEventListener("mouseout", () => { mouse.x = -9999; mouse.y = -9999; });
-
-    onResize(resize);
-
-    // pause when offscreen
-    if ("IntersectionObserver" in window) {
-      new IntersectionObserver((es) => {
-        es.forEach((en) => {
-          running = en.isIntersecting;
-          if (running && !raf) raf = requestAnimationFrame(draw);
-        });
-      }, { threshold: 0 }).observe(cvs);
-    }
-
-    resize();
-    raf = requestAnimationFrame(draw);
-  }
 
   /* ======================================================================
      8b. Hero form — a lit solid, not a wireframe.
@@ -690,18 +522,23 @@
       // the full width and a form placed beside it lands on top of the text.
       // There is no room to the side, so it takes the space below instead:
       // centred, smaller, and seated under the copy.
-      const NARROW = w < 760;
-      const SEAT  = NARROW ? 0.74 : 0.445;
-      const FILLS = NARROW ? 0.42 : 0.62;
-      const ZONE  = NARROW ? 0.86 : 0.46;
+      /* Named `tight`, not NARROW: there is a NARROW() helper in the outer
+         scope and a local called NARROW shadowed it, so inside this function
+         the name meant a boolean while everywhere else it meant a function.
+         It also measures something different - this is the CANVAS width, not
+         the viewport's. */
+      const tight = w < 760;
+      const SEAT  = tight ? 0.74 : 0.445;
+      const FILLS = tight ? 0.42 : 0.62;
+      const ZONE  = tight ? 0.86 : 0.46;
 
-      let cx = r.left + w * (NARROW ? 0.5 : 0.74), zoneW = w * ZONE;
+      let cx = r.left + w * (tight ? 0.5 : 0.74), zoneW = w * ZONE;
       const wrapEl = cvs.parentElement && cvs.parentElement.querySelector(".wrap");
       if (wrapEl) {
         const wr = wrapEl.getBoundingClientRect();
         const pad = parseFloat(getComputedStyle(wrapEl).paddingLeft) || 0;
         const cl = wr.left + pad, cw = Math.max(wr.width - pad * 2, 1);
-        cx = NARROW ? cl + cw * 0.5 : cl + cw * 0.735;   // beside the copy, or under it
+        cx = tight ? cl + cw * 0.5 : cl + cw * 0.735;   // beside the copy, or under it
         zoneW = cw * ZONE;
       }
       group.position.x = (cx - (r.left + w / 2)) / px;
@@ -1542,23 +1379,6 @@
     }
   }
 
-  /* ======================================================================
-     10. Videos — play only when visible, honour reduced motion
-     ====================================================================== */
-  function videos() {
-    const vids = $$("video[data-auto]");
-    if (!vids.length) return;
-    if (REDUCED) { vids.forEach((v) => { v.removeAttribute("autoplay"); v.pause(); }); return; }
-    if (!("IntersectionObserver" in window)) return;
-    const io = new IntersectionObserver((es) => {
-      es.forEach((en) => {
-        const v = en.target;
-        if (en.isIntersecting) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
-        else v.pause();
-      });
-    }, { threshold: 0.08 });
-    vids.forEach((v) => io.observe(v));
-  }
 
   /* ======================================================================
      11. Marquee — duplicate track for a seamless loop
@@ -1636,9 +1456,8 @@
 
   /* ---------------------------------------------------------------- init */
   function init() {
-    nav(); progress(); reveals(); heroLines(); decode(); parallax();
-    cardGlow(); counters(); network(); heroForm(); constellations();
-    field(); videos(); marquee();
+    nav(); progress(); reveals(); heroLines(); decode();
+    cardGlow(); heroForm(); constellations(); field(); marquee();
     forms(); insightFilters(); year();
     document.documentElement.classList.add("js-ready");
   }
