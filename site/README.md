@@ -149,5 +149,5 @@ wording in `aria-label`; the readout is `aria-live="polite"`.
   across 760px needs a reload. Never affects a real phone.
 - **`main.css` still carries rules for components no longer in the markup**
   (roughly 40 class names, from pages that were removed). Harmless, but it is
-  the next thing to prune if the stylesheet starts feeling unwieldy. Verify each
-  by hand — an automated sweep produces false positives.
+  the next thing to prune if the stylesheet starts feeling unwieldy. Still need
+  to verify each by hand.
