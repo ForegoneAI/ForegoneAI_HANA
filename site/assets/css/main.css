@@ -29,40 +29,49 @@
 /* ---------- Tokens ---------- */
 :root {
   /* surfaces */
-  --bg:          #08070A;
-  --bg-1:        #0C0A0D;
-  --bg-2:        #12100F;
-  --bg-raise:    #17141A;
-  --line:        rgba(237, 232, 225, 0.10);
-  --line-soft:   rgba(237, 232, 225, 0.055);
-  --glass:       rgba(237, 232, 225, 0.028);
+  --bg:          #060607;
+  --bg-1:        #0A0A0C;
+  --bg-2:        #0E0E11;
+  --bg-raise:    #141417;
+  --line:        rgba(255, 255, 255, 0.085);
+  --line-soft:   rgba(255, 255, 255, 0.045);
+  --glass:       rgba(255, 255, 255, 0.025);
 
-  /* ink */
-  --ink:         #EDE8E1;
-  --ink-2:       #B7AFA5;
-  --ink-3:       #857E76;
-  --ink-4:       #55504B;
+  /* ink — a pure neutral ramp; the reference has no hue anywhere in it */
+  --ink:         #F4F5F6;
+  --ink-2:       #A9ACB2;
+  --ink-3:       #71757C;
+  --ink-4:       #45484E;
 
   /* accents pulled from the HANA renders */
-  --amber:       #E8963A;
-  --amber-hot:   #FF7A2F;
-  --amber-soft:  #F4C67A;
-  --amber-deep:  #9A5418;
-  --dusk-teal:   #79C3BD;
-  --dusk-rose:   #E5A3AE;
-  --concrete:    #8A857E;
+  --amber:       #E6E6E6;
+  --amber-hot:   #FFFFFF;
+  --amber-soft:  #F5F5F5;
+  --amber-deep:  #4D4D4D;
+  --dusk-teal:   #A6A6A6;
+  --dusk-rose:   #C4C4C4;
+  --concrete:    #8C8C8C;
 
-  --amber-glow:  0 0 0 1px rgba(232,150,58,.28), 0 8px 40px -8px rgba(232,150,58,.35);
+  --amber-glow:  0 0 0 1px rgba(255,255,255,.28), 0 8px 40px -8px rgba(255,255,255,.35);
+
+  /* signature glow accent — used sparingly: live states, data, geometry */
+  /* the accent is light itself — one white source, used sparingly */
+  --glow:        #FFFFFF;
+  --glow-soft:   #E8EDF3;
+  --glow-deep:   #5A6068;
+  --glow-rgb:    236, 241, 247;
 
   /* type */
   --f-display: "Parkinsans", "Helvetica Neue", Arial, sans-serif;
   --f-body:    "Onest", "Helvetica Neue", Arial, sans-serif;
   --f-alt:     "Darker Grotesque", "Onest", sans-serif;
+  --f-mono:    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* rhythm */
-  --gutter: clamp(20px, 5vw, 64px);
-  --maxw: 1320px;
-  --sec-y: clamp(84px, 11vw, 172px);
+  --gutter: clamp(22px, 6.8vw, 96px);
+  --maxw: 1400px;
+  --nav-h: 74px;      /* 16px pad + 58px bar — the line the hero hangs from */
+  --sec-y: clamp(76px, 8.6vw, 136px);
 
   /* motion */
   --e-out: cubic-bezier(.16, 1, .3, 1);
@@ -92,11 +101,11 @@ body {
 img, video, canvas, svg { display: block; max-width: 100%; }
 a { color: inherit; text-decoration: none; }
 button, input, textarea, select { font: inherit; color: inherit; }
-::selection { background: var(--amber); color: #0A0806; }
+::selection { background: var(--glow); color: #0A0806; }
 
 /* Focus */
 :focus-visible {
-  outline: 2px solid var(--amber);
+  outline: 2px solid var(--glow);
   outline-offset: 3px;
   border-radius: 2px;
 }
@@ -119,6 +128,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
   padding-inline: var(--gutter);
 }
 .wrap--narrow { max-width: 940px; }
+/* keep anchor targets clear of the fixed nav */
+[id] { scroll-margin-top: clamp(92px, 12vh, 132px); }
 .section { padding-block: var(--sec-y); position: relative; }
 .section--tight { padding-block: clamp(56px, 7vw, 104px); }
 .section--flush-t { padding-top: 0; }
@@ -180,30 +191,42 @@ strong, b { color: var(--ink); font-weight: 600; }
 }
 
 /* eyebrow / section index */
+/* Section label — an editorial kicker, not a chip. A hairline rule that
+   fades out, then wide-tracked small caps. Labels shouldn't look clickable. */
 .eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  font-family: var(--f-body);
-  font-size: 0.685rem;
+  gap: 13px;
+  font-family: var(--f-mono);
+  font-size: 0.655rem;
   font-weight: 500;
-  letter-spacing: 0.19em;
+  letter-spacing: 0.26em;
   text-transform: uppercase;
   color: var(--ink-3);
-  margin-bottom: 22px;
+  margin-bottom: 26px;
 }
 .eyebrow::before {
   content: "";
-  width: 26px; height: 1px;
-  background: var(--amber);
+  width: 7px; height: 7px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: rgba(237, 232, 225, .4);
   flex: none;
 }
+/* accent variant — the rule carries the signature colour instead of a lamp */
+.eyebrow--dot {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-2);
+}
 .eyebrow--dot::before {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--amber);
-  box-shadow: 0 0 12px var(--amber);
-  animation: pulse 2.6s var(--e-io) infinite;
+  width: 7px; height: 7px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: var(--glow);
+  box-shadow: 0 0 14px rgba(var(--glow-rgb), .5);
 }
 @keyframes pulse {
   0%,100% { opacity: 1; transform: scale(1); }
@@ -252,7 +275,7 @@ strong, b { color: var(--ink); font-weight: 600; }
   color: #14100C;
   border-color: transparent;
   background: linear-gradient(105deg, var(--amber-hot), var(--amber) 55%, var(--amber-soft));
-  box-shadow: 0 10px 44px -14px rgba(232,150,58,.75);
+  box-shadow: 0 10px 44px -14px rgba(255,255,255,.75), 0 0 0 1px rgba(var(--glow-rgb), .18);
 }
 .btn--primary::after {
   background: var(--ink);
@@ -288,6 +311,20 @@ strong, b { color: var(--ink); font-weight: 600; }
 .tlink .arw { transition: transform .4s var(--e-out); }
 .tlink:hover .arw { transform: translateX(4px); }
 
+/* ---------- Sitewide technical grid backdrop ---------- */
+.bg-grid {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(135% 105% at 50% 0%, #000 22%, rgba(0,0,0,.45) 62%, transparent 100%);
+  mask-image: radial-gradient(135% 105% at 50% 0%, #000 22%, rgba(0,0,0,.45) 62%, transparent 100%);
+}
+
 /* ---------- Grain + vignette overlays ---------- */
 .grain {
   position: fixed;
@@ -315,7 +352,8 @@ strong, b { color: var(--ink); font-weight: 600; }
   height: 2px; width: 100%;
   transform-origin: 0 50%;
   transform: scaleX(0);
-  background: linear-gradient(90deg, var(--amber-deep), var(--amber), var(--amber-soft));
+  background: linear-gradient(90deg, var(--glow-deep), var(--glow), var(--glow-soft));
+  box-shadow: 0 0 10px rgba(var(--glow-rgb), .6);
   z-index: 900;
 }
 
@@ -326,21 +364,14 @@ strong, b { color: var(--ink); font-weight: 600; }
   position: fixed;
   inset: 0 0 auto 0;
   z-index: 800;
-  transition: background .5s var(--e-out), border-color .5s var(--e-out), backdrop-filter .5s;
-  border-bottom: 1px solid transparent;
-}
-.nav.is-stuck {
-  background: rgba(8, 7, 10, 0.72);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  border-bottom-color: var(--line-soft);
+  padding-top: 16px;
 }
 .nav__in {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  height: 74px;
+  gap: 20px;
+  height: 58px;
 }
 .brand {
   display: inline-flex;
@@ -351,39 +382,57 @@ strong, b { color: var(--ink); font-weight: 600; }
   font-size: 1.03rem;
   letter-spacing: -0.03em;
   flex: none;
+  justify-self: start;
 }
-.brand__mark { width: 26px; height: 26px; flex: none; }
-.brand__mark circle, .brand__mark path { transition: opacity .6s var(--e-out); }
-.brand:hover .brand__mark { animation: spinMark 1.1s var(--e-out); }
-@keyframes spinMark { to { transform: rotate(180deg); } }
-.brand em { font-style: normal; color: var(--amber); }
+.brand__mark {
+  width: 28px; height: 28px;
+  flex: none;
+  color: var(--ink);
+  transition: color .45s var(--e-out), transform .6s var(--e-out);
+}
+.brand:hover .brand__mark { color: var(--glow); transform: scale(1.06); }
+.brand em { font-style: normal; color: var(--glow); }
 
 .nav__links {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
   list-style: none;
+  justify-self: center;
 }
 .nav__links a {
   position: relative;
   display: block;
-  padding: 9px 15px;
-  font-size: .84rem;
+  padding: 9px 17px;
+  font-size: .82rem;
   font-weight: 400;
   color: var(--ink-2);
   border-radius: 100px;
-  transition: color .35s var(--e-out), background .35s var(--e-out);
+  border: 1px solid var(--line);
+  background: rgba(10, 9, 12, .55);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  transition: color .35s var(--e-out), background .35s var(--e-out), border-color .35s var(--e-out);
 }
-.nav__links a:hover { color: var(--ink); background: var(--glass); }
-.nav__links a.is-active { color: var(--ink); }
-.nav__links a.is-active::after {
-  content: "";
-  position: absolute;
-  left: 15px; right: 15px; bottom: 2px;
-  height: 1px;
-  background: var(--amber);
+.nav__links a:hover { color: var(--ink); border-color: var(--glow); }
+.nav__links a.is-active {
+  color: var(--bg);
+  background: var(--ink);
+  border-color: var(--ink);
 }
-.nav__cta { display: flex; align-items: center; gap: 10px; flex: none; }
+.nav__cta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  justify-self: end;
+}
+.nav__cta .btn {
+  border: 1px solid var(--line);
+  background: rgba(10, 9, 12, .55);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
 
 .burger {
   display: none;
@@ -464,6 +513,10 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
    ========================================================================== */
 .hero {
   position: relative;
+  /* svh is the small viewport — the height with Safari's URL bar SHOWING — so
+     the hero never grows taller than the screen and then shrink-jumps when the
+     bar collapses. The vh line before it is the fallback for iOS below 15.4. */
+  min-height: 100vh;
   min-height: 100svh;
   display: flex;
   align-items: flex-end;
@@ -472,8 +525,77 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   overflow: hidden;
   isolation: isolate;
 }
-.hero--sub { min-height: 74svh; }
+/* every hero runs the same height, so the copy lands on the same line on every
+   page — a shorter sub-page hero leaves its copy floating with dead space under
+   it and reads as a different layout */
+.hero--sub { min-height: 100vh; min-height: 100svh; }
+/* every hero anchors its copy to the bottom-left, so the form has the whole
+   upper frame to itself and the two read as one diagonal instead of two blocks
+   at the same eye level */
+.hero { padding-bottom: clamp(40px, 5.4vw, 74px); }
+/* index.html hero visual stack (no video) — grid, 3D geometry, scanline */
+/* soft light bloom behind the geometry — gives the object atmosphere and
+   depth instead of flat wire-on-black */
+.hero__aura {
+  position: absolute;
+  top: 54%; left: 50%;
+  width: min(1180px, 94vw);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  z-index: -7;
+  pointer-events: none;
+  background: radial-gradient(circle,
+    rgba(var(--glow-rgb), .2),
+    rgba(var(--glow-rgb), .07) 36%,
+    transparent 68%);
+  filter: blur(30px);
+  animation: aura 12s var(--e-io) infinite;
+}
+@keyframes aura {
+  0%,100% { transform: translate(-50%,-50%) scale(1);    opacity: 1; }
+  50%     { transform: translate(-50%,-50%) scale(1.07); opacity: .8; }
+}
+.hero__grid-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -8;
+  background-image:
+    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(115% 85% at 50% 28%, #000 42%, transparent 88%);
+  mask-image: radial-gradient(115% 85% at 50% 28%, #000 42%, transparent 88%);
+}
+.hero__gl {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -6;
+  pointer-events: none;
+}
+.hero__scan {
+  position: absolute;
+  inset: 0;
+  z-index: -5;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: .6;
+}
+.hero__scan::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: -160px;
+  height: 160px;
+  background: linear-gradient(180deg, transparent, rgba(var(--glow-rgb), .12), transparent);
+  animation: scan 9s linear infinite;
+}
+@keyframes scan {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(160vh); }
+}
 
+/* sub-pages still use a video-backed hero (unchanged) */
 .hero__media {
   position: absolute;
   inset: 0;
@@ -492,16 +614,119 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   inset: 0;
   z-index: -2;
   background:
-    linear-gradient(180deg, rgba(8,7,10,.86) 0%, rgba(8,7,10,.32) 34%, rgba(8,7,10,.72) 72%, var(--bg) 100%),
-    radial-gradient(120% 80% at 50% 100%, rgba(8,7,10,.86), transparent 62%);
+    linear-gradient(180deg, rgba(6,6,7,.86) 0%, rgba(6,6,7,.32) 34%, rgba(6,6,7,.72) 72%, var(--bg) 100%),
+    radial-gradient(120% 80% at 50% 100%, rgba(6,6,7,.86), transparent 62%);
 }
+/* index.html hero — directional scrim: heavy on the left so the copy sits on
+   calm darkness, clearing to the right so the geometry reads at full presence */
+.hero__scrim--thin {
+  background:
+    linear-gradient(90deg,
+      rgba(6,6,7,.94) 0%,
+      rgba(6,6,7,.88) 20%,
+      rgba(6,6,7,.66) 36%,
+      rgba(6,6,7,.38) 52%,
+      rgba(6,6,7,.16) 68%,
+      rgba(6,6,7,.05) 82%,
+      transparent 92%),
+    linear-gradient(180deg, rgba(6,6,7,.72) 0%, transparent 24%, transparent 60%, var(--bg) 100%);
+}
+/* ----------------------------------------------------------------------
+   The stage — copy on the left, the object on the right.
+
+   The two were sharing the same ground before, and a form lit this hard will
+   always win that fight: its rim is the brightest thing on the page. Giving
+   each a half removes the argument entirely, and the copy gets to sit on flat
+   black where small type belongs.
+   ---------------------------------------------------------------------- */
+.hero--stage { align-items: center; padding-top: calc(var(--nav-h) + 4px); }
+.hero--stage .hero__in { width: 100%; }
+
+.stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(24px, 5vw, 72px);
+}
+.stage__copy { max-width: 470px; }
+.stage__copy .eyebrow { margin-bottom: 20px; }
+.stage__copy .d1 {
+  font-size: clamp(2.1rem, 3.9vw, 3.3rem);
+  letter-spacing: -0.038em;
+  line-height: 1.04;
+  margin-bottom: 0;
+}
+.stage__copy .lede {
+  margin-top: clamp(14px, 2vh, 22px);
+  max-width: 40ch;
+  font-size: clamp(.88rem, 1vw, 1rem);
+  color: var(--ink-2);
+}
+.stage__copy .btn-row { margin-top: clamp(20px, 3vh, 32px); }
+
+/* the short index, under the copy in the same column */
+.stage__index {
+  list-style: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: clamp(14px, 2vw, 26px);
+  margin-top: clamp(26px, 4vh, 44px);
+  padding-top: clamp(16px, 2.2vh, 22px);
+  border-top: 1px solid var(--line-soft);
+}
+.stage__index a { display: grid; gap: 4px; color: inherit; }
+.stage__k {
+  font-family: var(--f-mono);
+  font-size: .64rem;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.stage__v { font-size: .82rem; color: var(--ink-2); line-height: 1.35; }
+.stage__index a:hover .stage__v { color: var(--ink); }
+
+/* the room: a low floor bloom under the object, and a bed under the copy */
+.hero--stage .hero__scrim {
+  background:
+    radial-gradient(46% 40% at 74% 72%, rgba(255,255,255,.05), transparent 70%),
+    linear-gradient(90deg, rgba(6,6,7,.72) 0%, rgba(6,6,7,.34) 34%, transparent 52%),
+    linear-gradient(180deg, rgba(6,6,7,.80) 0%, rgba(6,6,7,.22) 20%, transparent 42%),
+    linear-gradient(180deg, transparent 66%, rgba(6,6,7,.68) 88%, var(--bg) 100%);
+}
+
+@media (max-width: 860px) {
+  /* stack: copy first, the object gets the lower half of the frame */
+  .stage { grid-template-columns: minmax(0, 1fr); align-content: start; }
+  .stage__copy { max-width: none; }
+  .stage__index { grid-auto-flow: row; gap: 12px; }
+  .stage__index a { grid-template-columns: 4.4rem 1fr; align-items: baseline; gap: 12px; }
+}
+
 .hero__net {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   z-index: -1;
   opacity: .5;
   pointer-events: none;
 }
+.hero__frame {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.hero__frame i {
+  position: absolute;
+  width: 22px; height: 22px;
+  border-color: rgba(var(--glow-rgb), .55);
+}
+.hero__frame i:nth-child(1) { top: 22px; left: var(--gutter); border-top: 1.5px solid; border-left: 1.5px solid; }
+.hero__frame i:nth-child(2) { top: 22px; right: var(--gutter); border-top: 1.5px solid; border-right: 1.5px solid; }
+.hero__frame i:nth-child(3) { bottom: 22px; left: var(--gutter); border-bottom: 1.5px solid; border-left: 1.5px solid; }
+.hero__frame i:nth-child(4) { bottom: 22px; right: var(--gutter); border-bottom: 1.5px solid; border-right: 1.5px solid; }
 
 .hero__in { width: 100%; position: relative; z-index: 1; }
 .hero__grid {
@@ -510,8 +735,65 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   gap: clamp(28px, 5vw, 72px);
   align-items: end;
 }
-.hero .d1 { margin-bottom: 26px; }
-.hero .lede { max-width: 46ch; }
+/* index.html hero — text confined to one narrow column so the visual
+   carries most of the screen, matching the reference layouts */
+.hero__grid--solo { grid-template-columns: minmax(0, 1fr); }
+
+/* Hero type sits a step below the page's display scale on purpose. The form is
+   the subject of this frame; sizing the headline to match it makes the two
+   compete, and the shape stops reading as the thing you look at first. */
+/* A fixed measure for the hero copy. The layout centres the copy and the form
+   as a pair, and it sizes that pair from this column rather than from however
+   long a given page's headline happens to run — otherwise every page resolves
+   to slightly different margins.
+
+   The reserved height does the same job vertically. The block is anchored from
+   its bottom, so without it a page carrying less copy — no button row, a
+   one-line headline — starts further down, and the eyebrow that opens each page
+   lands on a different line every time you navigate. Reserving the tallest
+   block's height puts that first mark on one line across the site. */
+.hero__copy {
+  max-width: 430px;
+  min-height: clamp(252px, 21vw, 272px);
+}
+/* buttons are not prose — they size to their labels rather than to the text
+   measure, so a long pair doesn't stack and push the whole block taller than
+   its neighbours' */
+.hero__copy .btn-row {
+  width: max-content;
+  max-width: min(560px, calc(100vw - 2 * var(--gutter)));
+}
+.hero__copy .d1 {
+  font-size: clamp(1.7rem, 2.9vw, 2.5rem);
+  letter-spacing: -0.034em;
+  line-height: 1.05;
+  margin-bottom: 15px;
+}
+/* single-word lead headline gets to run larger than a stacked one */
+.hero__copy .d1--lead {
+  font-size: clamp(2.05rem, 4.2vw, 3.55rem);
+  letter-spacing: -0.039em;
+}
+/* acronym lockup — the name at full scale, its expansion set quietly beneath
+   it, rather than run on as one line that has to break mid-phrase */
+.hl-expand {
+  font-size: clamp(.85rem, 1.35vw, 1.25rem);
+  font-weight: 400;
+  letter-spacing: -0.006em;
+  color: var(--ink-2);
+}
+.rv-line--sub { margin-top: clamp(12px, 1.3vw, 22px); }
+
+/* dimmed first line — the light/bold headline pairing from the references */
+.hl-soft { color: var(--ink-2); font-weight: 300; opacity: .85; }
+.hero__copy .lede {
+  font-size: clamp(.82rem, .92vw, .9rem);
+  max-width: 36ch;
+  line-height: 1.64;
+}
+.hero .d1 { margin-bottom: 18px; }
+.hero .lede { max-width: 40ch; }
+.hero .eyebrow { font-size: .6rem; margin-bottom: 18px; }
 .hero__side {
   padding-bottom: 8px;
   border-left: 1px solid var(--line);
@@ -569,7 +851,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   overflow: hidden;
   border-block: 1px solid var(--line-soft);
   padding-block: 20px;
-  background: linear-gradient(180deg, transparent, rgba(232,150,58,.028), transparent);
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,.028), transparent);
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent);
 }
@@ -595,7 +877,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
 }
 .marquee i {
   font-style: normal;
-  color: var(--amber);
+  color: var(--glow);
   font-size: .6rem;
 }
 @keyframes slide { to { transform: translateX(-50%); } }
@@ -631,7 +913,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), rgba(232,150,58,.09), transparent 62%);
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), rgba(255,255,255,.09), transparent 62%);
   opacity: 0;
   transition: opacity .5s var(--e-out);
 }
@@ -677,8 +959,8 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   padding: clamp(24px, 3vw, 42px);
 }
 .panel--amber {
-  border-color: rgba(232,150,58,.24);
-  background: linear-gradient(160deg, rgba(232,150,58,.075), rgba(232,150,58,.01) 55%);
+  border-color: rgba(255,255,255,.24);
+  background: linear-gradient(160deg, rgba(255,255,255,.075), rgba(255,255,255,.01) 55%);
 }
 
 /* ---------- Split (text + media) ---------- */
@@ -708,7 +990,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
 .split__media::after {
   content: "";
   position: absolute; inset: 0;
-  background: linear-gradient(190deg, transparent 45%, rgba(8,7,10,.55));
+  background: linear-gradient(190deg, transparent 45%, rgba(6,6,7,.55));
   pointer-events: none;
 }
 .media-cap {
@@ -797,7 +1079,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   color: var(--ink);
   margin-bottom: 10px;
 }
-.stat__v em { font-style: normal; color: var(--amber); }
+.stat__v em { font-style: normal; color: var(--glow); text-shadow: 0 0 18px rgba(var(--glow-rgb), .45); }
 .stat__k {
   font-size: .72rem;
   letter-spacing: .15em;
@@ -837,23 +1119,25 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
 .sys__status {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   margin-top: 20px;
-  padding: 6px 13px;
-  border: 1px solid var(--line);
-  border-radius: 100px;
-  font-size: .66rem;
-  letter-spacing: .14em;
+  padding: 7px 0;
+  border: 0;
+  border-radius: 0;
+  font-family: var(--f-mono);
+  font-size: .63rem;
+  letter-spacing: .22em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
 .sys__status::before {
   content: "";
-  width: 5px; height: 5px;
-  border-radius: 50%;
-  background: var(--amber);
-  box-shadow: 0 0 8px var(--amber);
-  animation: pulse 2.4s var(--e-io) infinite;
+  width: 7px; height: 7px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: var(--glow);
+  box-shadow: 0 0 12px rgba(var(--glow-rgb), .5);
+  flex: none;
 }
 .sys__body > p + .ticks,
 .sys__body > p + h4 { margin-top: 26px; }
@@ -865,6 +1149,285 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   color: var(--ink-3);
   font-weight: 500;
   margin-bottom: 8px;
+}
+
+/* ==========================================================================
+   Constellations — information mapped onto a rotating 3D form.
+   The <ul> is the source of truth and the no-JS / no-WebGL fallback; JS adds
+   .is-3d, which lifts the items onto the shape's projected vertices.
+   ========================================================================== */
+.cstl {
+  position: relative;
+  margin-top: clamp(26px, 4vw, 48px);
+}
+.cstl__gl {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* --- fallback: a plain, readable list --- */
+.cstl__nodes { list-style: none; }
+.cstl__nodes > li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.cstl__node {
+  display: inline-block;
+  font-family: var(--f-body);
+  font-size: 1.02rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.cstl__node-b { font-size: .94rem; color: var(--ink-3); margin-top: 6px; }
+.cstl__hint, .cstl__panel { display: none; }
+
+/* --- 3D mode --- */
+/* ----------------------------------------------------------------------
+   The interactive index — callouts riding a rotating armature.
+
+   No object in the middle: the vertices and the lines between them are the
+   whole form. Anything sitting at the centre competed with the labels for the
+   one part of the frame every one of them has to cross.
+   ---------------------------------------------------------------------- */
+.cstl.is-3d { height: clamp(430px, 62vh, 620px); }
+.cstl.is-3d .cstl__nodes { position: absolute; inset: 0; margin: 0; }
+.cstl.is-3d .cstl__nodes > li {
+  position: absolute;
+  left: 0; top: 0;
+  padding: 0;
+  border: 0;
+  will-change: transform;
+}
+.cstl.is-3d .cstl__node-b { display: none; }
+
+/* a measured callout: squared plate, precision tick on the leading edge */
+.cstl.is-3d .cstl__node {
+  position: relative;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink-2);
+  border-radius: 4px;
+  background: rgba(6, 6, 7, .88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-family: var(--f-mono);
+  font-size: .64rem;
+  letter-spacing: .17em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .3s var(--e-out), border-color .3s var(--e-out),
+              background .3s var(--e-out), letter-spacing .3s var(--e-out);
+}
+/* label sits left of its vertex — move the tick to the facing edge */
+.cstl.is-3d li.is-left .cstl__node {
+  border-left: 1px solid var(--line);
+  border-right: 3px solid var(--ink-2);
+}
+.cstl.is-3d .cstl__node:hover,
+.cstl.is-3d .cstl__node:focus-visible,
+.cstl.is-3d li.is-on .cstl__node {
+  color: var(--bg);
+  background: var(--ink);
+  border-color: var(--ink);
+  letter-spacing: .2em;
+}
+
+.cstl.is-3d .cstl__hint {
+  display: block;
+  position: absolute;
+  left: 0; bottom: 0;
+  font-family: var(--f-mono);
+  font-size: .64rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+/* --- the readout --- */
+.cstl.is-3d .cstl__panel {
+  display: block;
+  position: absolute;
+  left: 0; top: 0;
+  width: min(330px, 76%);
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(6, 6, 7, .94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .28s var(--e-out);
+  z-index: 200;
+}
+.cstl.is-3d .cstl__panel.is-on { opacity: 1; }
+.cstl__panel .k {
+  display: block;
+  margin-bottom: 9px;
+  font-family: var(--f-mono);
+  font-size: .6rem;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.cstl__panel h4 {
+  font-family: var(--f-body);
+  font-size: 1.02rem;
+  font-weight: 500;
+  letter-spacing: -.012em;
+  line-height: 1.25;
+  color: var(--ink);
+}
+.cstl__panel p {
+  margin-top: 7px;
+  font-size: .9rem;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+@media (max-width: 700px) {
+  .cstl.is-3d .cstl__node { font-size: .58rem; padding: 6px 10px; letter-spacing: .12em; }
+  .cstl.is-3d .cstl__panel { width: min(290px, 84vw); padding: 15px 17px; }
+}
+
+@media (max-width: 700px) {
+  .cstl.is-3d .cstl__node { font-size: .6rem; padding: 6px 11px 6px 22px; }
+  .cstl.is-3d .cstl__panel { width: min(300px, 84vw); padding: 16px 18px; }
+}
+
+/* ==========================================================================
+   Insights index — filter bar + entry cards
+   ========================================================================== */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: clamp(26px, 3.2vw, 42px);
+}
+.filter {
+  padding: 9px 17px;
+  border: 1px solid var(--line);
+  border-radius: 100px;
+  background: rgba(10, 9, 12, .55);
+  font-family: var(--f-mono);
+  font-size: .68rem;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: color .35s var(--e-out), border-color .35s var(--e-out), background .35s var(--e-out);
+}
+.filter:hover { color: var(--ink); border-color: var(--glow); }
+.filter.is-on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+
+.posts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.post {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: clamp(24px, 2.6vw, 36px);
+  background: var(--bg);
+  isolation: isolate;
+  overflow: hidden;
+  transition: background .5s var(--e-out);
+}
+.post::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), rgba(var(--glow-rgb), .07), transparent 62%);
+  opacity: 0;
+  transition: opacity .5s var(--e-out);
+}
+.post:hover::before { opacity: 1; }
+.post.is-hidden { display: none; }
+
+.post__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-family: var(--f-mono);
+  font-size: .65rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.post__cat  { color: var(--glow); }
+.post__date { color: var(--ink-4); }
+.post__tag {
+  margin-left: auto;
+  padding: 3px 9px;
+  border: 1px dashed var(--line);
+  border-radius: 2px;
+  color: var(--ink-4);
+  font-size: .58rem;
+  letter-spacing: .18em;
+}
+.post h3 {
+  font-family: var(--f-display);
+  font-size: clamp(1.12rem, 1.7vw, 1.45rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+}
+.post p { font-size: .93rem; }
+.post__more {
+  margin-top: auto;
+  padding-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--f-mono);
+  font-size: .66rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: color .35s var(--e-out);
+}
+.post:hover .post__more { color: var(--ink); }
+.post:hover .post__more .arw { transform: translateX(4px); }
+.post__more .arw { transition: transform .4s var(--e-out); }
+
+/* unpublished template entry — visibly provisional, never mistakable for live work */
+.post--draft h3, .post--draft p { color: var(--ink-3); }
+.post--draft .post__more { opacity: .5; }
+
+.post__empty {
+  margin-top: 26px;
+  padding: 22px;
+  border: 1px dashed var(--line);
+  border-radius: 3px;
+  text-align: center;
+  font-family: var(--f-mono);
+  font-size: .72rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-4);
 }
 
 /* ==========================================================================
@@ -888,7 +1451,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
 .band__scrim {
   position: absolute; inset: 0; z-index: -1;
   background:
-    linear-gradient(90deg, rgba(8,7,10,.94) 8%, rgba(8,7,10,.6) 52%, rgba(8,7,10,.85)),
+    linear-gradient(90deg, rgba(6,6,7,.94) 8%, rgba(6,6,7,.6) 52%, rgba(6,6,7,.85)),
     linear-gradient(180deg, var(--bg), transparent 22%, transparent 78%, var(--bg));
 }
 
@@ -927,8 +1490,8 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
 .field input::placeholder, .field textarea::placeholder { color: var(--ink-4); }
 .field input:focus, .field select:focus, .field textarea:focus {
   outline: none;
-  border-color: var(--amber);
-  background: rgba(232,150,58,.045);
+  border-color: var(--glow);
+  background: rgba(var(--glow-rgb), .06);
 }
 .field select { appearance: none; cursor: pointer; }
 .field--sel { position: relative; }
@@ -948,11 +1511,11 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
 .form__ok {
   display: none;
   padding: 16px 18px;
-  border: 1px solid rgba(232,150,58,.35);
-  background: rgba(232,150,58,.08);
+  border: 1px solid rgba(var(--glow-rgb), .35);
+  background: rgba(var(--glow-rgb), .08);
   border-radius: 3px;
   font-size: .9rem;
-  color: var(--amber-soft);
+  color: var(--glow-soft);
 }
 .form__ok.show { display: block; }
 
@@ -981,7 +1544,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   aspect-ratio: 1;
   transform: translateX(-50%);
   z-index: -1;
-  background: radial-gradient(circle, rgba(232,150,58,.20), rgba(232,150,58,.06) 42%, transparent 66%);
+  background: radial-gradient(circle, rgba(255,255,255,.20), rgba(255,255,255,.06) 42%, transparent 66%);
   filter: blur(14px);
   animation: breathe 9s var(--e-io) infinite;
 }
@@ -992,6 +1555,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
 .cta__field {
   position: absolute;
   inset: auto 0 0 0;
+  width: 100%;
   height: 78%;
   z-index: -1;
   opacity: .5;
@@ -1058,20 +1622,20 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
 .foot__bar a:hover { color: var(--ink-2); }
 
 /* giant wordmark at the very bottom */
+/* scales to the container width, so the whole word always fits — the old
+   fixed vw sizing overflowed and .foot's overflow:hidden ate the "AI" */
 .foot__word {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 40px;
+  user-select: none;
+}
+.foot__word text {
   font-family: var(--f-display);
   font-weight: 700;
-  font-size: clamp(3rem, 15.5vw, 15rem);
-  line-height: .8;
-  letter-spacing: -0.055em;
-  text-align: center;
-  margin-top: 40px;
-  background: linear-gradient(180deg, rgba(237,232,225,.10), rgba(232,150,58,.055) 62%, transparent);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  user-select: none;
-  white-space: nowrap;
+  font-size: 140px;
+  fill: url(#footWordFade);
 }
 
 /* ==========================================================================
@@ -1117,6 +1681,7 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
     padding-left: 0;
     padding-top: 22px;
   }
+  .posts { grid-template-columns: 1fr; }
   .split, .split--wide-l, .split--wide-r { grid-template-columns: 1fr; }
   .split--rev .split__media { order: -1; }
   .g3 { grid-template-columns: repeat(2, minmax(0,1fr)); }
@@ -1125,12 +1690,23 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   .row > p { grid-column: 2; }
 }
 
+@media (max-width: 900px) {
+  /* copy stacks under the object on narrow screens — darken downward instead */
+  .hero__scrim--thin {
+    background: linear-gradient(180deg,
+      rgba(6,6,7,.55) 0%, transparent 24%,
+      rgba(6,6,7,.78) 58%, rgba(6,6,7,.94) 78%, var(--bg) 100%);
+  }
+  .hero__aura { left: 50%; top: 38%; }
+}
+
 @media (max-width: 640px) {
   .g2, .g3, .g4 { grid-template-columns: 1fr; }
   .ticks--2 { grid-template-columns: 1fr; }
   .form__row { grid-template-columns: 1fr; }
   .foot__grid { grid-template-columns: 1fr; }
   .hero { padding-top: 110px; }
+  .hero__frame { display: none; }
 }
 
 /* ---------- Reduced motion ---------- */
@@ -1145,3 +1721,152 @@ body.menu-open .drawer__links li:nth-child(7) a { transition-delay: .44s; }
   .rv-line > span { transform: none !important; }
   .grain { animation: none; }
 }
+
+
+/* ==========================================================================
+   Touch
+   Pointer targets sized for a fingertip. On a mouse a 18px-tall footer link is
+   a fine target; on a phone it is a miss waiting to happen, so the links that
+   sit in tight lists get real vertical room rather than a bigger font.
+   ========================================================================== */
+@media (hover: none) and (pointer: coarse) {
+  .foot__links a,
+  .foot__col a,
+  .foot a,
+  .tlink,
+  .deets a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .brand { min-height: 44px; }
+  .filter { min-height: 44px; }
+  .cstl__node { min-height: 44px; display: flex; align-items: center; }
+  .drawer__links a { min-height: 52px; display: flex; align-items: center; }
+}
+
+/* the hero's own breathing room on a phone: the copy sits high so the form
+   below it has somewhere to stand */
+@media (max-width: 760px) {
+  .hero--stage { padding-top: calc(var(--nav-h) + 8px); align-items: start; }
+  .stage { padding-block: clamp(18px, 4vh, 34px) 0; }
+  .stage__copy { padding-top: clamp(8px, 3vh, 28px); }
+  .stage__copy .d1 { font-size: clamp(2rem, 8.4vw, 2.7rem); }
+  .stage__copy .lede { font-size: clamp(.9rem, 3.6vw, 1rem); max-width: 34ch; }
+  .btn-row .btn { width: 100%; justify-content: space-between; }
+}
+
+
+/* ==========================================================================
+   iPhone
+   Everything below is about the shape of the device rather than the width of
+   the window: the notch, the home indicator, and the fact that the pointer is
+   a fingertip.
+   ========================================================================== */
+
+/* The pages declare viewport-fit=cover so the background runs under the
+   rounded corners and the notch. That is only safe if the CONTENT is then held
+   off them, which is what these insets do. max() keeps the normal gutter on
+   every device that has no inset to report. */
+@supports (padding: max(0px)) {
+  .wrap {
+    padding-left:  max(var(--gutter), env(safe-area-inset-left));
+    padding-right: max(var(--gutter), env(safe-area-inset-right));
+  }
+  .nav { padding-top: max(16px, env(safe-area-inset-top)); }
+  .drawer {
+    padding-left:   max(var(--gutter), env(safe-area-inset-left));
+    padding-right:  max(var(--gutter), env(safe-area-inset-right));
+    padding-bottom: max(40px, calc(env(safe-area-inset-bottom) + 24px));
+  }
+  /* 34px is the footer's own padding — the inset can only ADD to it, never
+     replace it, or every device without an inset loses the gap. */
+  .foot { padding-bottom: max(34px, calc(env(safe-area-inset-bottom) + 12px)); }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* Safari paints a hard grey box over any tapped link by default. */
+  a, button, summary, .cstl__node, .filter, .burger {
+    -webkit-tap-highlight-color: rgba(255, 255, 255, .05);
+  }
+  /* Rubber-banding the whole document past an open drawer looks broken. */
+  body.menu-open { overscroll-behavior: none; }
+  .drawer { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+}
+
+/* ==========================================================================
+   Constellations on a narrow frame
+
+   Same pinned-label layout as the desktop: every label rides its own vertex,
+   so the object carries its own index. Only the sizing changes, because the
+   desktop plate is a nowrap line built for a 1440px stage and would be a
+   third of a phone wide. Here the plates wrap, the type comes down, and the
+   readout docks to the bottom edge instead of floating beside a label, which
+   on a frame this narrow would cover the other four.
+
+   This sits at the end of the sheet so it outranks the .is-3d rules and the
+   touch block above on source order, which is more honest than stacking up
+   selectors to win a specificity fight.
+   ========================================================================== */
+@media (max-width: 760px) {
+  /* Enough frame to hold five labels apart, but no more: the fit below sizes
+     the form to the WIDTH on a portrait canvas, so extra height buys dead
+     space above and below the object rather than a bigger object. */
+  .cstl.is-3d { height: clamp(400px, 57vh, 560px); }
+
+  .cstl.is-3d .cstl__node {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+    max-width: min(43vw, 158px);
+    padding: 5px 9px;
+    border-left-width: 2px;
+    font-size: .5rem;
+    letter-spacing: .1em;
+    line-height: 1.4;
+    white-space: normal;
+    text-align: left;
+  }
+  .cstl.is-3d li.is-left .cstl__node {
+    border-left-width: 1px;
+    border-right-width: 2px;
+  }
+
+  /* the hint moves to the top of the frame: the readout owns the bottom */
+  .cstl.is-3d .cstl__hint {
+    top: 0;
+    bottom: auto;
+    font-size: .55rem;
+    letter-spacing: .12em;
+  }
+
+  .cstl.is-3d .cstl__panel {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    padding: 13px 15px;
+    transform: none !important;
+  }
+  .cstl.is-3d .cstl__panel .k { margin-bottom: 6px; }
+  .cstl.is-3d .cstl__panel h4 { font-size: .95rem; }
+  .cstl.is-3d .cstl__panel p  { font-size: .86rem; margin-top: 5px; }
+}
+
+/* On touch the form itself is a tap target, so it has to receive the events
+   the desktop version deliberately passes straight through.
+
+   The label list is what stops them getting there. It is an absolutely
+   positioned <ul> stretched over the whole frame, so although it looks like
+   five small plates it is really one full-size sheet, and every tap aimed at
+   the object landed on it instead. Making the sheet transparent to pointers
+   and the plates opaque again leaves each one catching its own taps and the
+   gaps between them falling through to the form, which is what it looks like
+   should happen. */
+.cstl.is-3d.is-narrow .cstl__gl {
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.cstl.is-3d.is-narrow .cstl__nodes { pointer-events: none; }
+.cstl.is-3d.is-narrow .cstl__node  { pointer-events: auto; }
