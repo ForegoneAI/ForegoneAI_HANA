@@ -1,0 +1,5 @@
+# Only needed to run the automated test suite (backend/tests/) - not needed
+# to run the app itself. Install with:
+#   pip install -r requirements.txt -r requirements-dev.txt
+pytest==9.1.1
+httpx==0.28.1

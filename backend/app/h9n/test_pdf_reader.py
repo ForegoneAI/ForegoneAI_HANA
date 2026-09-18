@@ -1,4 +1,4 @@
-from Backend.app.h9n.ingestion.pdf_reader import read_pdf
+from backend.app.h9n.ingestion.pdf_reader import read_pdf
 
 
 # Path to the PDF we want H9N to read

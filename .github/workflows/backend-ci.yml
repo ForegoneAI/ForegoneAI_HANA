@@ -1,0 +1,44 @@
+# Runs the backend's automated test suite on every push and pull request.
+#
+# This is what lets the team see "does the backend still work" as a plain
+# green check (or red X) on GitHub, without anyone cloning the repo,
+# installing Python packages, or running anything themselves - just look at
+# the PR or the commit.
+#
+# No ANTHROPIC_API_KEY is needed here: the tests fake the Claude API call
+# (see backend/tests/test_repe_extractor.py), so this costs nothing and never
+# touches the real API.
+name: Backend tests
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - "backend/**"
+      - "requirements*.txt"
+      - "pytest.ini"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "requirements*.txt"
+      - "pytest.ini"
+      - ".github/workflows/backend-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -v
