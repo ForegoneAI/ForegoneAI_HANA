@@ -5,11 +5,13 @@ from fastapi import FastAPI, HTTPException, UploadFile
 
 from backend.app.h9n.extraction.repe_extractor import extract_repe_deal
 from backend.app.h9n.ingestion.pdf_reader import read_pdf
+from backend.app.h9n.rag.api import router as rag_router
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 
 
 # Creates the main FastAPI application for HANA
 app = FastAPI()
+app.include_router(rag_router)
 
 
 # Basic endpoint used to verify that the backend is running
