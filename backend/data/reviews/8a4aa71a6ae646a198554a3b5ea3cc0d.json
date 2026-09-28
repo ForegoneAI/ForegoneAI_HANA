@@ -1,0 +1,88 @@
+{
+  "deal_name": "Two Tenant Modified Net Leased Investment",
+  "location": "Atlanta, GA 30312",
+  "transaction_type": "Sale",
+  "asking_price": 1084999.0,
+  "missing_information": [],
+  "conflicting_information": [],
+  "evidence": [
+    {
+      "field_name": "deal_name",
+      "value": "Two Tenant Modified Net Leased Investment",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 1,
+      "snippet": "TWO TENANT MODIFIED NET LEASED INVESTMENT"
+    },
+    {
+      "field_name": "property_name",
+      "value": "349-353 Edgewood Avenue",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 5,
+      "snippet": "3 4 9 - 3 5 3 E D G E W O O D AV E N U E"
+    },
+    {
+      "field_name": "property_type",
+      "value": "Retail",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 4,
+      "snippet": "2 tenant modified NNN leased investment"
+    },
+    {
+      "field_name": "address",
+      "value": "349-353 Edgewood Avenue, Atlanta, GA 30312",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 5,
+      "snippet": "Address 349-353 Edgewood Avenue, Atlanta, GA 30312"
+    },
+    {
+      "field_name": "asking_price",
+      "value": "1085000",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 5,
+      "snippet": "Price $1,085,000"
+    },
+    {
+      "field_name": "noi",
+      "value": "76653.41",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 5,
+      "snippet": "NOI $76,653.41"
+    },
+    {
+      "field_name": "cap_rate",
+      "value": "7",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 5,
+      "snippet": "Cap Rate 7%"
+    }
+  ],
+  "uncertain_information": [
+    "property_type: Inferred to be 'Retail' based on the tenants (Harold's Chicken & Ice Bar and City Ink tattoo parlor) rather than explicitly stated as retail property"
+  ],
+  "corrected_fields": [
+    "asking_price"
+  ],
+  "review_feedback": "the asking price is wrong, it's actually $950k",
+  "review_status": "rejected",
+  "property_name": "349-353 Edgewood Avenue",
+  "property_type": "Retail",
+  "address": "349-353 Edgewood Avenue, Atlanta, GA 30312",
+  "market": "Atlanta",
+  "submarket": "Sweet Auburn",
+  "units": null,
+  "square_feet": 3140.0,
+  "year_built": 1946,
+  "occupancy_rate": null,
+  "annual_revenue": null,
+  "operating_expenses": null,
+  "noi": 76653.41,
+  "cap_rate": 7.0,
+  "loan_amount": null,
+  "interest_rate": null,
+  "ltv": null,
+  "loan_term_years": null,
+  "sponsor_name": "Bull Realty, Inc.",
+  "sponsor_equity": null,
+  "investment_strategy": "Modified NNN Leased Investment",
+  "business_plan": "2 tenant modified NNN leased investment with established tenants (Harold's Chicken & Ice Bar with lease through 2029 and City Ink with lease through 2022). Landlord responsible for roof and structure only. Property features new roof with warranty, trolley stop directly in front, and 4.33% annual rent increases."
+}

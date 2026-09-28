@@ -1,0 +1,95 @@
+{
+  "deal_name": "Two Tenant Modified Net Leased Investment",
+  "location": "Atlanta, GA",
+  "transaction_type": "Sale",
+  "asking_price": 1084999.0,
+  "missing_information": [
+    "Annual revenue not provided",
+    "Operating expenses not provided",
+    "Financing terms (loan amount, LTV, interest rate, loan term) not provided",
+    "Sponsor/seller name not provided"
+  ],
+  "conflicting_information": [],
+  "evidence": [
+    {
+      "field_name": "deal_name",
+      "value": "Two Tenant Modified Net Leased Investment",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 1,
+      "snippet": "TWO TENANT MODIFIED NET LEASED INVESTMENT"
+    },
+    {
+      "field_name": "property_name",
+      "value": "349-353 Edgewood Avenue",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 5,
+      "snippet": "3 4 9 - 3 5 3 E D G E W O O D AV E N U E"
+    },
+    {
+      "field_name": "property_type",
+      "value": "Retail",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 4,
+      "snippet": "HAROLD'S CHICKEN & ICE BAR... CITY INK A Custom Tattoo Parlor and Art Gallery"
+    },
+    {
+      "field_name": "address",
+      "value": "349-353 Edgewood Avenue, Atlanta, GA 30312",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 5,
+      "snippet": "Address 349-353 Edgewood Avenue, Atlanta, GA 30312"
+    },
+    {
+      "field_name": "asking_price",
+      "value": "1085000",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 4,
+      "snippet": "P R I C E | $ 1 , 0 8 5 , 0 0 0"
+    },
+    {
+      "field_name": "cap_rate",
+      "value": "7",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 5,
+      "snippet": "Cap Rate 7%"
+    },
+    {
+      "field_name": "noi",
+      "value": "76653.41",
+      "source_document": "sample_offering_memorandum.pdf",
+      "page_number": 5,
+      "snippet": "NOI $76,653.41"
+    }
+  ],
+  "uncertain_information": [
+    "property_type inferred from tenant descriptions (restaurant and tattoo parlor) rather than explicitly stated as retail",
+    "occupancy_rate inferred from 2 tenant property being fully leased but not explicitly stated as 100%",
+    "investment_strategy inferred as Core based on stabilized property with long-term leases but not explicitly stated"
+  ],
+  "corrected_fields": [
+    "asking_price"
+  ],
+  "review_feedback": null,
+  "review_status": "rejected",
+  "property_name": "349-353 Edgewood Avenue",
+  "property_type": "Retail",
+  "address": "349-353 Edgewood Avenue, Atlanta, GA 30312",
+  "market": "Atlanta",
+  "submarket": "Sweet Auburn",
+  "units": null,
+  "square_feet": 3140.0,
+  "year_built": 1946,
+  "occupancy_rate": 100.0,
+  "annual_revenue": null,
+  "operating_expenses": null,
+  "noi": 76653.41,
+  "cap_rate": 7.0,
+  "loan_amount": null,
+  "interest_rate": null,
+  "ltv": null,
+  "loan_term_years": null,
+  "sponsor_name": null,
+  "sponsor_equity": null,
+  "investment_strategy": "Core",
+  "business_plan": "Stabilized two tenant modified NNN leased investment with established tenants on long-term leases through 2022 and 2029 with 4.33% annual rent increases. Landlord responsible for roof and structure only."
+}
