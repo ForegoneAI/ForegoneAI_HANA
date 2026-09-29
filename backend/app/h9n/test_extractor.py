@@ -1,11 +1,12 @@
 """
-Manual smoke test / checkpoint script for H9N Milestone 1, Parts 1-2.
+Manual smoke test / checkpoint script for H9N Milestone 1, Parts 1-3.
 
 Runs the full pipeline described in the "Immediate Next Move" section of the
 Milestone 1 plan: read_pdf() -> extract_repe_deal() -> validated
 REPEDealProfile, with no manual data entry. Also prints the source evidence
 (item 2) for each important field, so you can spot-check a value against the
-document it says the value came from.
+document it says the value came from, and any uncertainty flags (item 3) so
+you know which values are worth double-checking first.
 
 Usage:
     export ANTHROPIC_API_KEY=sk-ant-...
@@ -51,6 +52,11 @@ def main() -> None:
         for item in deal.evidence:
             print(f"  - {item.field_name} = {item.value!r}")
             print(f"      {item.source_document}, page {item.page_number}: \"{item.snippet}\"")
+
+    if deal.uncertain_information:
+        print("\nUncertain values flagged by the model (worth double-checking first):")
+        for note in deal.uncertain_information:
+            print(f"  - {note}")
 
 
 if __name__ == "__main__":

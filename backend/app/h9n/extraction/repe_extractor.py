@@ -1,8 +1,8 @@
 """
 repe_extractor.py
 
-H9N Milestone 1, Parts 1-2 - LLM Structured Extraction + Field-Level Source
-Evidence.
+H9N Milestone 1, Parts 1-3 - LLM Structured Extraction, Field-Level Source
+Evidence, and Uncertainty Flagging.
 
 Takes the page-preserved text produced by
 `backend.app.h9n.ingestion.pdf_reader.read_pdf` for a real estate deal
@@ -17,20 +17,34 @@ document, the page number, and a short supporting snippet - via
 able to see where H9N obtained a value instead of trusting an unexplained
 model output.
 
-This module intentionally does NOT yet implement:
-- uncertainty flagging beyond the schema's missing/conflicting lists (item 3)
-- human review & correction (item 4)
-- evaluation against a ground-truth set (items 5-7)
-Those are separate, later steps in the Milestone 1 plan.
+On top of that, the model is asked to flag any important field where it DID
+find a value but isn't fully confident it's correct - e.g. it had to infer or
+calculate the number, or the wording was ambiguous - via
+`REPEDealProfile.uncertain_information`. This is Milestone 1, item 3: a
+reviewer's attention should be drawn to the values most worth double-checking,
+not just the ones that are missing or contradictory.
+
+This module also implements the LLM side of Milestone 1, item 4 - Human
+Review and Correction: `apply_reviewer_feedback` lets a reviewer describe
+what's wrong with an extracted profile in plain language and have Claude
+re-derive the corrected field(s) from the original document text, rather
+than the reviewer having to work out and submit exact values themselves
+(that manual path still exists too - see `DealStore.apply_corrections`).
+
+This module intentionally does NOT yet implement evaluation against a
+ground-truth set (items 5-7) - that's a separate, later step in the
+Milestone 1 plan.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Optional
 
 import anthropic
 
+from backend.app.h9n.schemas.base_deal import FieldEvidence
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 
 
@@ -100,6 +114,18 @@ from that page's text that supports the value. Never paraphrase or invent \
 the snippet.
 - Do not add an evidence entry for a field you left null or could not find \
 anywhere in the document.
+- For each of these important fields ({_IMPORTANT_FIELDS_TEXT}) where you DID \
+find a value but are not fully confident it's correct, add a short note to \
+`uncertain_information` naming the field and explaining why, for example: \
+the value had to be calculated or inferred rather than read directly \
+(e.g. cap rate derived from NOI and asking price instead of stated outright), \
+the wording was ambiguous or informal (e.g. "around $10M", a rounded or \
+approximate figure), or the value came from a source that seems less \
+authoritative than the rest of the document (e.g. a marketing summary rather \
+than the financial statements). Do not use `uncertain_information` for a \
+field that's simply missing (use `missing_information`) or one where the \
+document states two contradictory values (use `conflicting_information`) - \
+this is only for a single value you did extract but don't fully trust.
 """
 
 
@@ -120,7 +146,9 @@ def _build_tool_schema() -> dict[str, Any]:
             "field on the schema should be considered; fields with no "
             "support in the source text should be left null. Important "
             "fields should also get a matching entry in `evidence` citing "
-            "where the value came from."
+            "where the value came from, and a note in `uncertain_information` "
+            "if the value was found but isn't fully trustworthy (inferred, "
+            "calculated, or ambiguously worded)."
         ),
         "input_schema": schema,
     }
@@ -216,3 +244,203 @@ def extract_repe_deal(
     # doesn't match the schema (e.g. wrong type for a field) - the caller
     # gets pydantic's normal, field-by-field error detail for debugging.
     return REPEDealProfile(**tool_call.input)
+
+
+# --- Milestone 1, item 4 (extended) - feedback-driven correction ---------
+#
+# apply_corrections() in review/store.py lets a reviewer push exact values
+# they've already worked out ("asking_price should be 950000"). The
+# functions below instead let a reviewer just describe what's *wrong*
+# ("the asking price looks off, the OM actually says $950k on page 4") and
+# have Claude re-derive the correct value(s) from the original document
+# text, the same way the initial extraction did - rather than the reviewer
+# having to re-read the document and compute the correction themselves.
+
+FEEDBACK_TOOL_NAME = "apply_reviewer_feedback"
+
+FEEDBACK_SYSTEM_PROMPT = f"""You are H9N's structured extraction engine for real estate \
+private equity (REPE) deal packages, now helping a human reviewer correct a \
+previous extraction.
+
+You will be given the full text of a deal package (broken into pages, each \
+one marked with its source file name and page number), the REPEDealProfile \
+that was already extracted from it, and a reviewer's note explaining what's \
+wrong with that profile. Your job is to call the `{FEEDBACK_TOOL_NAME}` tool \
+with the fix.
+
+Rules:
+- Only change fields the reviewer's note indicates are actually wrong. Leave \
+every other field alone - do not "helpfully" re-extract fields the reviewer \
+didn't flag, even if you'd extract them differently a second time.
+- Only use information explicitly stated in the document text to decide the \
+corrected value. Never guess, estimate, or invent a value - if the reviewer's \
+note points at a field but the document doesn't clearly support a specific \
+corrected value, leave that field out of `corrections` rather than making one \
+up, and explain why in `explanation`.
+- `corrections` is a mapping of exact REPEDealProfile field name (e.g. \
+"asking_price") to its corrected value. Include only fields that are actually \
+changing.
+- For each of these important fields ({_IMPORTANT_FIELDS_TEXT}) that appears \
+in `corrections`, add a matching entry to `updated_evidence` (field_name, \
+value, source_document, page_number, snippet) citing where the corrected \
+value came from, the same way the original extraction would have. Don't add \
+an `updated_evidence` entry for a field that isn't in `corrections`.
+- `explanation` is a short (one or two sentence) note of what was wrong and \
+what you changed, for the audit trail - written for the reviewer, not the \
+document author.
+"""
+
+
+def _build_feedback_tool_schema() -> dict[str, Any]:
+    evidence_schema = FieldEvidence.model_json_schema()
+    evidence_schema.pop("title", None)
+
+    return {
+        "name": FEEDBACK_TOOL_NAME,
+        "description": (
+            "Records the corrected field value(s) for a REPEDealProfile "
+            "that a human reviewer has flagged as wrong, based on the "
+            "reviewer's own explanation and the original deal package text."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "corrections": {
+                    "type": "object",
+                    "description": (
+                        "Mapping of exact REPEDealProfile field name to its "
+                        "corrected value. Only include fields that are "
+                        "actually changing."
+                    ),
+                    "additionalProperties": True,
+                },
+                "updated_evidence": {
+                    "type": "array",
+                    "description": (
+                        "One entry per important field present in "
+                        "`corrections`, citing where the corrected value "
+                        "came from."
+                    ),
+                    "items": evidence_schema,
+                },
+                "explanation": {
+                    "type": "string",
+                    "description": "What was wrong and what changed, for the audit trail.",
+                },
+            },
+            "required": ["corrections", "explanation"],
+        },
+    }
+
+
+def apply_reviewer_feedback(
+    pages: list[dict[str, Any]],
+    deal: REPEDealProfile,
+    feedback: str,
+    *,
+    client: Optional[anthropic.Anthropic] = None,
+    model: str = DEFAULT_MODEL,
+) -> dict[str, Any]:
+    """Given the original document pages, the current (reviewer-flagged)
+    deal profile, and the reviewer's own explanation of what's wrong, asks
+    Claude to re-derive just the affected field(s) from the source text.
+
+    Parameters
+    ----------
+    pages:
+        The same page-preserved text (from `read_pdf()`) the deal was
+        originally extracted from - typically fetched via
+        `DealStore.get_pages()`.
+    deal:
+        The deal profile as it stands right now (before this correction).
+    feedback:
+        The reviewer's plain-language explanation of what's wrong, e.g.
+        "the asking price is wrong, it should be around $950k per page 4".
+
+    Returns
+    -------
+    dict
+        {"corrections": {field_name: value, ...},
+         "updated_evidence": [{"field_name": ..., "value": ..., ...}, ...],
+         "explanation": "..."}
+        `corrections` is meant to be passed straight to
+        `DealStore.apply_corrections()`.
+
+    Raises
+    ------
+    ValueError
+        If `pages` is empty, or the model does not return a usable
+        structured response.
+    """
+    if not pages:
+        raise ValueError(
+            "apply_reviewer_feedback() received no pages. The deal's source "
+            "text is required to re-derive a corrected value - see "
+            "DealStore.save_pages()/get_pages()."
+        )
+    if not feedback or not feedback.strip():
+        raise ValueError("apply_reviewer_feedback() requires non-empty reviewer feedback.")
+
+    document_text = _pages_to_document_text(pages)
+    llm_client = client or anthropic.Anthropic()
+
+    response = llm_client.messages.create(
+        model=model,
+        max_tokens=MAX_OUTPUT_TOKENS,
+        system=FEEDBACK_SYSTEM_PROMPT,
+        tools=[_build_feedback_tool_schema()],
+        tool_choice={"type": "tool", "name": FEEDBACK_TOOL_NAME},
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Here is the original deal package text, split by page:\n\n"
+                    f"{document_text}\n\n"
+                    "Here is the REPEDealProfile as currently extracted "
+                    "(as JSON):\n\n"
+                    f"{json.dumps(deal.model_dump(), indent=2)}\n\n"
+                    "Here is the reviewer's explanation of what's wrong "
+                    f"with it:\n\n{feedback}"
+                ),
+            }
+        ],
+    )
+
+    tool_call = next(
+        (block for block in response.content if block.type == "tool_use"),
+        None,
+    )
+    if tool_call is None:
+        text_blocks = [block.text for block in response.content if block.type == "text"]
+        raise ValueError(
+            "Claude did not return a structured correction. "
+            f"stop_reason={response.stop_reason!r} "
+            f"text={' '.join(text_blocks)!r}"
+        )
+
+    result = dict(tool_call.input)
+    result.setdefault("corrections", {})
+    result.setdefault("updated_evidence", [])
+    result.setdefault("explanation", "")
+    return result
+
+
+def merge_evidence(existing: list[Any], updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replaces any existing FieldEvidence entry (from `deal.evidence`, so
+    either FieldEvidence objects or plain dicts) whose field_name matches
+    one of `updates` (the `updated_evidence` list `apply_reviewer_feedback`
+    returns), and appends the rest - so a correction's citation supersedes
+    the (now-wrong) original one instead of leaving both around.
+
+    Shared by both the API (main.py's review endpoint) and the interactive
+    demo, so a feedback-driven correction's evidence gets merged the same
+    way regardless of which one applied it.
+    """
+    updated_field_names = {update["field_name"] for update in updates}
+    kept = [
+        entry.model_dump() if hasattr(entry, "model_dump") else entry
+        for entry in existing
+        if (entry.field_name if hasattr(entry, "field_name") else entry["field_name"])
+        not in updated_field_names
+    ]
+    return kept + updates
