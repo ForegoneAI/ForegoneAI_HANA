@@ -1,17 +1,31 @@
+import hashlib
 import tempfile
+import time
+from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Optional
+from uuid import UUID, uuid4
 
-from fastapi import Body, FastAPI, HTTPException, UploadFile
+from fastapi import Body, FastAPI, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from backend.app.h9n.extraction.repe_extractor import (
+    DEFAULT_MODEL,
     apply_reviewer_feedback,
     extract_repe_deal,
+    extraction_input_sha256,
+    extraction_prompt_sha256,
     merge_evidence,
 )
+from backend.app.h9n.extraction.run_repository import (
+    ExtractionRunRecord,
+    SupabaseExtractionRunRepository,
+)
 from backend.app.h9n.ingestion.pdf_reader import read_pdf
+from backend.app.h9n.rag.api import require_internal_rag_access
 from backend.app.h9n.rag.api import router as rag_router
+from backend.app.h9n.rag.config import RagConfigurationError, get_rag_settings
 from backend.app.h9n.review.store import DealNotFoundError, DealStore
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 
@@ -26,11 +40,20 @@ app.include_router(rag_router)
 _review_store = DealStore()
 
 
+# Milestone 1.3: where extraction runs are recorded. Built on first use so the
+# app still starts (and tests still run) without Supabase credentials.
+@lru_cache
+def get_extraction_run_repository() -> SupabaseExtractionRunRepository:
+    return SupabaseExtractionRunRepository(get_rag_settings())
+
+
 # What POST /extract returns: the extracted profile plus the id it was
 # saved under, so the caller can look it up again later for review.
+# extraction_run_id is only set when the run was recorded in Supabase.
 class ExtractResponse(BaseModel):
     deal_id: str
     profile: REPEDealProfile
+    extraction_run_id: Optional[UUID] = None
 
 
 # What a reviewer submits to POST /deals/{deal_id}/review. Only "approved"
@@ -66,16 +89,31 @@ def test_repe_deal(deal: REPEDealProfile):
 # REPEDealProfile - no manual data entry. The profile is also saved to the
 # review store (item 4) so it can be fetched and corrected later by the
 # returned deal_id, instead of only existing in this one response.
+#
+# Milestone 1.3: when an organization_id is supplied, every attempt -
+# successful or failed - is also recorded as an extraction run in Supabase
+# (see run_repository.py). Recording writes into that tenant's data with the
+# service role, so until real user auth exists it requires the same internal
+# operator key as the RAG routes.
 @app.post("/api/h9n/repe/extract", response_model=ExtractResponse)
-def extract_repe_deal_from_upload(file: UploadFile) -> ExtractResponse:
+def extract_repe_deal_from_upload(
+    file: UploadFile,
+    organization_id: Optional[UUID] = Form(None),
+    x_h9n_api_key: Optional[str] = Header(default=None, alias="X-H9N-API-Key"),
+) -> ExtractResponse:
     if file.content_type not in ("application/pdf", None) and not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF deal packages are supported right now.")
+
+    if organization_id is not None:
+        require_internal_rag_access(x_h9n_api_key)
+
+    file_bytes = file.file.read()
 
     # read_pdf() takes a file path, so the upload is written to a temp file
     # (auto-deleted once the request finishes) rather than re-implementing
     # PDF parsing from an in-memory stream.
     with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
-        tmp.write(file.file.read())
+        tmp.write(file_bytes)
         tmp.flush()
 
         pages = read_pdf(tmp.name)
@@ -87,18 +125,64 @@ def extract_repe_deal_from_upload(file: UploadFile) -> ExtractResponse:
         for page in pages:
             page["file_name"] = Path(file.filename).name
 
+    deal_id = uuid4().hex
+    started_at = datetime.now(timezone.utc)
+    started = time.perf_counter()
+    deal: Optional[REPEDealProfile] = None
+    error: Optional[Exception] = None
     try:
         deal = extract_repe_deal(pages)
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:  # Recorded as a failed run below, then re-raised.
+        error = exc
 
-    deal_id = _review_store.save(deal)
+    extraction_run_id = None
+    if organization_id is not None:
+        extraction_run_id = _record_extraction_run(
+            ExtractionRunRecord(
+                organization_id=organization_id,
+                deal_id=deal_id,
+                status="failed" if error else "succeeded",
+                model=DEFAULT_MODEL,
+                prompt_sha256=extraction_prompt_sha256(),
+                source_filename=Path(file.filename).name,
+                source_sha256=hashlib.sha256(file_bytes).hexdigest(),
+                input_sha256=extraction_input_sha256(pages),
+                page_count=len(pages),
+                profile=deal,
+                error_type=type(error).__name__ if error else None,
+                error_message=str(error)[:2000] if error else None,
+                started_at=started_at,
+                completed_at=datetime.now(timezone.utc),
+                latency_ms=round((time.perf_counter() - started) * 1000),
+            )
+        )
+
+    if isinstance(error, ValueError):
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if error is not None:
+        raise error
+
+    _review_store.save(deal, deal_id)
     # So a reviewer's future rejection feedback has something to re-derive
     # a correction from (see the review endpoint below) - without this, a
     # correction could only ever be the exact value a human already worked
     # out, never one Claude re-derives from the source text.
     _review_store.save_pages(deal_id, pages)
-    return ExtractResponse(deal_id=deal_id, profile=deal)
+    return ExtractResponse(deal_id=deal_id, profile=deal, extraction_run_id=extraction_run_id)
+
+
+def _record_extraction_run(run: ExtractionRunRecord) -> UUID:
+    """Saves a run, failing the request if it can't be saved, so no caller ever
+    receives an extraction that isn't traceable (Milestone 1.3)."""
+    try:
+        return get_extraction_run_repository().record(run)
+    except RagConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # Never echo database errors back to the caller.
+        raise HTTPException(
+            status_code=502,
+            detail="The extraction run could not be recorded, so its result was not returned.",
+        ) from exc
 
 
 # Milestone 1, item 4: fetch a previously extracted deal by id, e.g. to show

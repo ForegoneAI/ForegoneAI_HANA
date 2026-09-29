@@ -38,6 +38,7 @@ Milestone 1 plan.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any, Optional
@@ -163,6 +164,21 @@ def _pages_to_document_text(pages: list[dict[str, Any]]) -> str:
         marker = f"--- {label} | Page {page['page_number']} ---"
         blocks.append(f"{marker}\n{page['text'].strip()}")
     return "\n\n".join(blocks)
+
+
+def extraction_prompt_sha256() -> str:
+    """Fingerprints the system prompt and tool schema sent with every
+    extraction (Milestone 1.3), so a saved run records exactly which
+    instructions produced it without anyone having to bump a version number
+    by hand when the prompt or REPEDealProfile changes."""
+    tool_schema = json.dumps(_build_tool_schema(), sort_keys=True)
+    return hashlib.sha256(f"{SYSTEM_PROMPT}\n{tool_schema}".encode()).hexdigest()
+
+
+def extraction_input_sha256(pages: list[dict[str, Any]]) -> str:
+    """Fingerprints the page-preserved text the model actually receives, so
+    two runs can be confirmed to have seen identical input (Milestone 1.3)."""
+    return hashlib.sha256(_pages_to_document_text(pages).encode()).hexdigest()
 
 
 def extract_repe_deal(
