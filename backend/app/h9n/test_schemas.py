@@ -1,5 +1,5 @@
-from Backend.app.h9n.schemas.repe_deal import REPEDealProfile
-from Backend.app.h9n.schemas.pe_deal import PEDealProfile
+from backend.app.h9n.schemas.repe_deal import REPEDealProfile
+from backend.app.h9n.schemas.pe_deal import PEDealProfile
 
 
 # Creates a sample Real Estate Private Equity deal
