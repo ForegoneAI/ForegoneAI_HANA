@@ -259,6 +259,31 @@ correction with an unknown field name or a value of the wrong type gets a 400 in
 corrupting the saved deal, and a review request with anything other than `"approved"` or
 `"rejected"` gets a 422.
 
+### Recording extraction runs in Supabase (Milestone 1.3)
+
+To keep a permanent, traceable record of an extraction, pass an `organization_id` and the internal
+API key. The run is saved to Supabase with the model, a hash of the prompt, hashes of the PDF and
+of the text Claude saw, the profile, and its page-level evidence:
+
+```bash
+curl -X POST http://localhost:8000/api/h9n/repe/extract \
+  -H "X-H9N-API-Key: $H9N_RAG_INTERNAL_API_KEY" \
+  -F "organization_id=11111111-1111-1111-1111-111111111111" \
+  -F "file=@taberna_cim.pdf"
+```
+
+The response then also includes an `extraction_run_id`. A few things to know:
+
+- **Without `organization_id`, nothing is recorded.** The endpoint works exactly as above, which
+  keeps local testing possible without Supabase.
+- **Failed extractions are recorded too.** If the run itself can't be saved, the request fails
+  rather than returning a result that can't be traced.
+- **The API key is a development gate, not real login.** Once Supabase user auth exists, the
+  organization should come from the logged-in user, and recording should always happen.
+- **Setup:** apply `supabase/migrations/20260921_create_h9n_rag.sql` *before*
+  `20260929_create_h9n_extraction_runs.sql`, and set the Supabase variables in `.env` (see
+  [RAG.md](./RAG.md)). The migration's comments describe each table and column.
+
 ## Settings
 
 | Env var | Required? | Default | What it's for |
