@@ -20,59 +20,157 @@ are passing - both readable without installing anything.
 3. It sends that text to Claude and asks it to fill in the fields on `REPEDealProfile` (deal
    name, property type, address, asking price, NOI, cap rate, and so on) using only what the
    document actually says.
-4. For the deal's most important fields, it also asks Claude to say exactly where each value
-   came from - which document, which page, and a short quote from that page - and saves that as
-   `evidence` on the same profile.
-5. For those same important fields, if Claude found a value but isn't fully confident it's
-   correct (it had to infer or calculate it, or the wording was ambiguous), it notes that in
-   `uncertain_information` so a reviewer knows which values are worth double-checking first.
-6. Claude's answer is checked against the same `REPEDealProfile` model the rest of the app uses.
-   If Claude gives back something that doesn't fit (wrong type, made-up field), this fails loudly
-   with a normal Python error instead of quietly saving bad data.
+4. For every value it finds, Claude must also say exactly where it came from - which document,
+   which page, and a short verbatim quote from that page.
+5. If Claude found a value but isn't fully confident in it (ambiguous or approximate wording), or
+   the document states two different values, it flags that field.
+6. Claude's answer is checked against a strict schema: every field present (an explicit `null`
+   when the document doesn't say), no made-up or reviewer-only fields, no placeholders like
+   `"N/A"`, no impossible numbers. An answer that doesn't fit is sent back once with the list of
+   problems; if it still doesn't fit, the extraction fails with a clear error and nothing is saved.
+7. Every value is then checked against the document itself. Only values whose quoted passage is
+   really on the cited page, really contains the value, and that Claude didn't flag are stored.
+   Everything else is left `null` and listed in `withheld_values` for a human reviewer - see
+   "Extraction reliability" below.
 
-The instructions given to Claude say: only use what's written in the document, leave a field
-blank (`null`) if it's not there, write a short note in `missing_information` if something
-important is missing, write a note in `conflicting_information` if the document says two
-different things about the same field instead of just picking one, and turn things like
-"$10.0M" or "6.5%" into plain numbers.
+The instructions given to Claude say: only use what's written in the document (never guess or
+calculate), set a field to `null` if it's not there, list an important field that isn't stated in
+`missing_information` (starting with the field name), flag a field as `conflicting` if the
+document says two different things about it instead of silently picking one, use the document's
+own words for text values (trimmed and recapitalized, never swapped for other words), and turn
+things like "$10.0M" or "6.5%" into plain numbers.
+
+## Extraction reliability (Milestone 1.1)
+
+The rule: **a profile's value fields hold only values whose cited passage of the document contains
+them.** Model output that is malformed never reaches the database, and model output that is
+well-formed but unsupported never reaches a value field. That holds for the reviewer-feedback
+correction path too.
+
+Every value Claude returns ends up in exactly one place:
+
+| What Claude returned | Stored in the field | Recorded in `withheld_values` |
+|---|---|---|
+| A value whose quote is on the cited page and contains the value, not flagged | the value, plus its `evidence` | - |
+| A value whose citation doesn't hold up: page not in the document, quote under 8 characters, quote not on that page, or the quoted passage doesn't contain the value | `null` | the proposed value, the citation, and why it failed |
+| A value Claude flagged as uncertain or conflicting | `null` | the proposed value, the citation, and Claude's note |
+| A value Claude also listed in `missing_information` | `null` | the proposed value, reason `model_listed_as_missing` |
+| A value with no citation at all | `null` | the proposed value, reason `no_evidence` |
+| Nothing (not stated in the document) | `null` | - (a `missing_information` note if it's an important field) |
+
+Each `withheld_values` entry has `field_name`, `proposed_value`, `reason` (`no_evidence`,
+`page_not_in_document`, `snippet_too_short`, `snippet_not_on_page`, `value_not_in_snippet`,
+`model_uncertain`, `model_conflicting`, or `model_listed_as_missing`), a plain-language `detail`,
+and the `evidence` Claude gave, if any. `missing_information` only ever lists what the document
+doesn't state; withheld values are not repeated there.
+
+**Why null instead of keeping the value with a note:** if a reviewer misses a note, a null field
+stays "unknown" - later screening treats it as unknown rather than acting on a guess. A value
+kept beside a note could be approved by accident and flow into screening and underwriting as if
+it were fact. A null field with a proposed value next to it is also much harder to overlook in a
+review form.
+
+**Resolving a withheld value (Milestone 2):** accept it by setting the field and clearing the
+entry (`PATCH /api/h9n/repe/deals/{deal_id}` with e.g.
+`{"asking_price": 10000000, "withheld_values": [...remaining entries...]}` - the field is then
+recorded in `corrected_fields` as human-verified), or dismiss it by clearing the entry and
+leaving the field `null`. A dedicated resolve endpoint, and blocking approval while entries are
+unresolved, are recommended for M2.4.
+
+**How a quote is matched to the page:** case, spacing and line breaks, curly vs straight quotes,
+dashes, ligatures, invisible characters (soft hyphens, zero-width spaces), and a word hyphenated
+across a line are all tolerated. Letters and digits that touch in the quote must touch on the page,
+so "2400" can't be matched against "2" and "400" on separate lines, and a quote can't start or end
+mid-word. "..." may join pieces of a quote that are at most 150 characters apart (a table label and
+its value: `"Units ... 400"`); for a numeric field the skipped text may not contain another number.
+
+**How the value is matched to the quote:**
+- **Numbers** are read from the page itself, with their context: sign (`-$150,000`,
+  `($150,000)`), scale (`$10.0M`, `950K`, `18.5 million`), `%`, `$`, and a unit word after them
+  (`128 units`, `85,000 SF`, `10-year`). The value must equal one of the quoted numbers exactly
+  (a percentage may also be a fraction: `0.94` supports 94), and the number must be the right kind
+  for the field: an asking price can't come from "128 units", a cap rate can't come from "$6.5M".
+- **Text fields** must appear in the quoted passage as whole words, ignoring case and dashes
+  ("Self-Storage" matches "self-storage facility"). A reworded value ("Multifamily" quoted from
+  "apartment community") is withheld; normalized vocabularies are left to M1.4.
+- **`business_plan` and `investment_strategy`** are summaries, so only their quote is checked;
+  their evidence is labelled `verification: "quote_only"`, against `"value_matched"` for every
+  other stored value. Treat quote-only values as needing a human look.
+
+**Controlled errors:** every failure is an `ExtractionError` (a `ValueError`) with a message that
+is safe to show a caller - no model output, keys, or provider internals:
+
+| Problem | Error | HTTP status from `/extract` |
+|---|---|---|
+| Upload larger than 50 MB | - | 413 |
+| File isn't a readable PDF, is encrypted, has no text (scanned), or has more than 500 pages | `PdfReadError` | 422 |
+| Pages malformed or the document is longer than `H9N_EXTRACTION_MAX_INPUT_CHARS` | `ExtractionInputError` | 422 |
+| Output cut off (`max_tokens`), or still invalid after a retry | `ExtractionOutputError` | 502 |
+| Claude declined the request | `ExtractionRefusedError` | 502 |
+| Timeout, connection failure, rate limit, provider 5xx, or the time budget ran out (after H9N's retries) | `ExtractionUnavailableError` | 503 |
+| Missing/invalid API key, unknown model, invalid setting | `ExtractionConfigurationError` | 503 (details only in the server log) |
+| Anything unexpected | - | 500 (details only in the server log) |
+
+**Retries and the time budget:** timeouts, connection failures, 408/409/429 and 5xx responses are
+retried with backoff (1s, 2s, 4s...) up to `H9N_EXTRACTION_MAX_RETRIES` times. The SDK's own
+retries are switched off, so `H9N_EXTRACTION_TIMEOUT_SECONDS` is a hard budget for the whole
+extraction - every request, retry and backoff - rather than a per-request limit that retries
+multiply.
+
+When the request includes an `organization_id` (M1.3), every one of these that happens after the
+PDF is read is recorded as a failed extraction run, with the error type.
+
+**Reviewer-feedback corrections** (`POST /deals/{id}/review` with `rejected` + `feedback`) go
+through the same machinery: the same strict validation (Claude can change only deal value fields -
+never `review_status`, `withheld_values` or `evidence` directly), retries, time budget and
+evidence checks. A corrected value is applied only if its citation verifies; otherwise it's added
+to `withheld_values`. Clearing a field to `null` needs no citation. If the correction step fails,
+the response is a 502/503 whose message says the rejection and feedback were still saved.
+
+**Stable input:** the PDF is read in memory, each page's text is normalized the same way every
+time (Unicode, line endings, control characters, invisible characters, trailing spaces), and blank
+pages are skipped without renumbering the rest - so the M1.3 input fingerprint is reproducible and
+citations still point at the real page.
 
 ## Source evidence
 
-For a fixed list of important fields - `deal_name`, `property_name`, `property_type`, `address`,
-`asking_price`, `noi`, `cap_rate` (this list lives in one place, `IMPORTANT_FIELDS` in
-`repe_extractor.py`, so the "what's missing" check and the "where did this come from" check can
-never drift apart) - the profile's `evidence` list has one entry per field Claude actually found,
-each with:
+Every stored value has an entry in the profile's `evidence` list (since Milestone 1.1 - before
+that, only the important fields did), each with:
 
 - `field_name` - which field this is evidence for, e.g. `"asking_price"`.
-- `value` - the value Claude extracted, as plain text.
+- `value` - the stored value, as plain text.
 - `source_document` - the file name it came from.
 - `page_number` - the page it came from.
 - `snippet` - a short quote from that page backing up the value.
+- `verification` - `"value_matched"` (the quote contains the value) or `"quote_only"` (narrative
+  fields, where only the quote is checked).
 
 This is what lets a reviewer check "did Claude actually make this up, or is it really in the
 document" without re-reading the whole CIM - they can jump straight to the page and sentence.
-There's no evidence entry for a field Claude left blank, and evidence currently isn't collected
-for every field on the schema, only the important ones listed above.
+There's no evidence entry for a field left blank; a value whose citation didn't check out keeps
+its citation in `withheld_values` instead (see "Extraction reliability" above).
+
+`IMPORTANT_FIELDS` in `repe_extractor.py` (`deal_name`, `property_name`, `property_type`,
+`address`, `asking_price`, `noi`, `cap_rate`) now only decides which absent fields get a
+`missing_information` note.
 
 ## Uncertainty flagging
 
-Not every value on the profile is equally trustworthy, even when it's not missing and doesn't
-contradict anything else in the document. `uncertain_information` is a list of short, plain-text
-notes (same shape as `missing_information` and `conflicting_information`) for exactly that
-in-between case: Claude found a value for one of the important fields, but flagged it as worth a
-second look because, for example:
+Not every value is equally trustworthy, even when it's stated and cited. Claude flags a field as
+**uncertain** when, for example:
 
-- it had to be **calculated or inferred** rather than read directly (e.g. a cap rate worked out
-  from NOI and asking price instead of being stated outright)
 - the wording was **ambiguous or approximate** (e.g. "around $10M" rather than an exact figure)
 - the value came from a **less authoritative section** of the document (e.g. a marketing summary
   rather than the financial statements)
 
-This is different from the other two lists: `missing_information` means nothing was found at all,
-`conflicting_information` means the document states two different values for the same field, and
-`uncertain_information` means exactly one value was extracted but shouldn't be taken at face
-value. A field can only end up in one of the three - never more than one at a time.
+and as **conflicting** when the document states two different values for it. Since Milestone 1.1
+a flagged value is **not stored** in its field: it is left `null` and put in `withheld_values`
+with Claude's note, for a reviewer to accept or dismiss. The notes also still appear as plain
+text in `uncertain_information` / `conflicting_information`.
+
+Values that would have to be **calculated or inferred** (e.g. a cap rate worked out from NOI and
+asking price when the document never states one) are no longer extracted at all - the field is
+left `null`.
 
 ## Human review and correction
 
@@ -164,11 +262,13 @@ PDF uploaded
    workspace with no Admin API access. Copy the full key the moment it's shown — the console
    only displays it once, and there's no way to view it again afterward. If you miss it, delete
    that key and create a new one.
-2. **Put the key in your environment**, not in any file in this repo:
+2. **Put the key in your environment or in `.env`**, not in any tracked file in this repo:
    ```powershell
    $env:ANTHROPIC_API_KEY="sk-ant-your-key-here"
    ```
-   (or `setx ANTHROPIC_API_KEY "sk-ant-..."` to set it permanently instead of per-session)
+   (or `setx ANTHROPIC_API_KEY "sk-ant-..."` to set it permanently instead of per-session).
+   Alternatively copy `.env.example` to `.env` (gitignored) and set `ANTHROPIC_API_KEY` there;
+   the extractor reads `.env` without overriding variables already set in the environment.
 3. **Install the dependencies**, from the repository root (the folder that contains `backend`,
    `Frontend`, and this repo's `.git` folder — not from inside `backend` itself) —
    `requirements.txt` lives there, not inside `backend`:
@@ -177,6 +277,16 @@ PDF uploaded
    ```
    (`requirements-dev.txt` is only needed to run the automated test suite — skip it if you just
    want to run the app.)
+
+   **macOS / Linux:** `anthropic` 1.x needs Python 3.10+ (CI uses 3.12), so use a virtual
+   environment on 3.12:
+   ```bash
+   brew install python@3.12            # macOS, if python3.12 isn't installed
+   python3.12 -m venv .venv && source .venv/bin/activate
+   pip install -r requirements.txt -r requirements-dev.txt
+   cp .env.example .env                # then set ANTHROPIC_API_KEY in .env
+   pytest -v
+   ```
 
 ## How to use it from the command line
 
@@ -225,8 +335,10 @@ curl -X POST http://localhost:8000/api/h9n/repe/extract \
 }
 ```
 
-If you upload something that isn't a PDF, you get a 400 error. If the PDF has no readable text,
-or Claude doesn't return something usable, you get an error instead of an empty/blank profile.
+If you upload something that isn't a PDF, you get a 400 error. A file that can't be read as a PDF,
+or has no readable text, gets a 422; if Claude doesn't return something usable, or can't be
+reached, you get a 502 or 503 with a plain explanation instead of an empty/blank profile (see the
+error table under "Extraction reliability").
 
 Fetch that same deal again later by its id:
 
@@ -289,7 +401,10 @@ The response then also includes an `extraction_run_id`. A few things to know:
 | Env var | Required? | Default | What it's for |
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | — | Your Claude API key |
-| `H9N_EXTRACTION_MODEL` | No | `claude-sonnet-4-5-20250929` | Which Claude model to use |
+| `H9N_EXTRACTION_MODEL` | No | `claude-sonnet-4-5-20250929` | Which Claude model to use (re-run the held-out evaluation after changing it) |
+| `H9N_EXTRACTION_TIMEOUT_SECONDS` | No | `300` | Time budget for one whole extraction or correction, retries included (1-3600) |
+| `H9N_EXTRACTION_MAX_RETRIES` | No | `2` | How many times H9N retries a timeout, connection error, rate limit, or 5xx response (0-10) |
+| `H9N_EXTRACTION_MAX_INPUT_CHARS` | No | `600000` | Longest document text (roughly 150k tokens) sent in one extraction; longer packages get a 422 |
 
 ## If you edit this file (or switch providers) and Python won't pick up the change
 
@@ -303,11 +418,13 @@ again.
 
 `backend/tests/` is a `pytest` suite that runs automatically on every push and pull request (see
 `.github/workflows/backend-ci.yml`) — that's the checkmark you see on commits and PRs, and the
-badge at the top of this file. It fakes the Claude API call (`unittest.mock`), so it needs no
+badge at the top of this file. It fakes the Claude API call (`backend/tests/extraction_fakes.py`), so it needs no
 `ANTHROPIC_API_KEY`, costs nothing, and never touches a real deal document — it's checking that
 the code around the API call is correct (schema building, page-text joining, evidence parsing,
 the review store, the upload/fetch/correct/review endpoints' error handling, the evaluation
-suite's scoring logic), not grading extraction quality on a real document.
+suite's scoring logic, and - since Milestone 1.1 - strict output validation, retries, controlled
+errors, and the evidence checks in `test_extraction_reliability.py`), not grading extraction
+quality on a real document.
 
 If you want to run it yourself instead of trusting the badge:
 
@@ -340,7 +457,11 @@ are a floor, not a substitute for that.
 This covers extraction with source evidence and uncertainty flags, human review and correction via
 the API, and an evaluation suite scored against known-correct (if currently synthetic) answers. It
 doesn't yet:
-- track evidence or uncertainty for every field, only the important ones listed above
+- normalize wording (property types, investment strategies, state abbreviations) - a reworded value
+  is withheld for now; vocabularies belong to M1.4
+- tell which table column a value came from - a table quote that skips over another number is
+  withheld rather than guessed
+- read scanned PDFs (no OCR) or packages longer than one extraction request
 - offer a reviewer-facing UI - correction only happens through the API directly for now
 - evaluate against real, human-reviewed deals - the ground-truth and holdout sets are synthetic
 

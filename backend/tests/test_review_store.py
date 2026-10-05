@@ -7,6 +7,7 @@ backend/data/reviews/ directory.
 import pytest
 
 from backend.app.h9n.review.store import DealNotFoundError, DealStore
+from backend.app.h9n.schemas.base_deal import WithheldValue
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 
 
@@ -193,3 +194,37 @@ def test_list_ids_does_not_count_a_pages_file_as_a_separate_deal(tmp_path):
     store.save_pages(deal_id, [{"file_name": "fixture.pdf", "page_number": 1, "text": "hello"}])
 
     assert store.list_ids() == [deal_id]
+
+
+def test_withheld_values_round_trip_through_the_store(tmp_path):
+    store = DealStore(tmp_path)
+    withheld = WithheldValue(
+        field_name="asking_price",
+        proposed_value=1_000_000,
+        reason="no_evidence",
+        detail="The model gave this value without citing where it came from.",
+    )
+
+    deal_id = store.save(REPEDealProfile(deal_name="Fixture Deal", withheld_values=[withheld]))
+
+    assert store.get(deal_id).withheld_values == [withheld]
+
+
+def test_accepting_a_withheld_value_marks_only_the_field_as_corrected(tmp_path):
+    # How an M2 reviewer resolves a withheld value today: set the field and
+    # clear the entry. The field counts as human-verified; clearing the
+    # withheld list is bookkeeping, not a correction.
+    store = DealStore(tmp_path)
+    withheld = WithheldValue(
+        field_name="asking_price",
+        proposed_value=1_000_000,
+        reason="no_evidence",
+        detail="The model gave this value without citing where it came from.",
+    )
+    deal_id = store.save(REPEDealProfile(deal_name="Fixture Deal", withheld_values=[withheld]))
+
+    deal = store.apply_corrections(deal_id, {"asking_price": 1_000_000, "withheld_values": []})
+
+    assert deal.asking_price == 1_000_000
+    assert deal.withheld_values == []
+    assert deal.corrected_fields == ["asking_price"]

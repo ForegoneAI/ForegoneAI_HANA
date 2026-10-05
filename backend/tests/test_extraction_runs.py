@@ -17,9 +17,12 @@ from fastapi.testclient import TestClient
 from backend.app import main
 from backend.app.h9n.extraction.repe_extractor import (
     DEFAULT_MODEL,
+    ExtractionOutputError,
+    ExtractionUnavailableError,
     extraction_input_sha256,
     extraction_prompt_sha256,
 )
+from backend.app.h9n.extraction.extraction_output import REPEExtractionOutput, enforce_integrity
 from backend.app.h9n.extraction.run_repository import (
     ExtractionRunRecord,
     SupabaseExtractionRunRepository,
@@ -29,6 +32,7 @@ from backend.app.h9n.rag.config import RagSettings
 from backend.app.h9n.review.store import DealStore
 from backend.app.h9n.schemas.base_deal import FieldEvidence
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
+from backend.tests.extraction_fakes import evidence, full_output
 
 
 def _settings() -> RagSettings:
@@ -250,3 +254,81 @@ def test_extract_returns_nothing_when_the_run_cannot_be_recorded(tmp_path, monke
     assert response.status_code == 502
     assert "database unavailable" not in response.text
     assert store.list_ids() == []
+
+
+# --- Milestone 1.1: controlled failures and withheld values are recorded ------
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code"),
+    [
+        (ExtractionOutputError("The model's output was cut off."), 502),
+        (ExtractionUnavailableError("The model provider timed out."), 503),
+    ],
+)
+def test_extract_records_the_specific_failure_type(repository, monkeypatch, error, status_code):
+    def failing_extract(pages):
+        raise error
+
+    monkeypatch.setattr(main, "extract_repe_deal", failing_extract)
+
+    response = _post_extract(uuid4())
+
+    assert response.status_code == status_code
+    run = repository.runs[0]
+    assert run.status == "failed"
+    assert run.error_type == type(error).__name__
+    assert run.profile is None
+
+
+def test_an_unreadable_upload_is_rejected_before_a_run_exists(repository, monkeypatch):
+    monkeypatch.setattr(main, "extract_repe_deal", lambda pages: _profile())
+
+    response = TestClient(main.app).post(
+        "/api/h9n/repe/extract",
+        headers={"X-H9N-API-Key": "test-internal-key"},
+        data={"organization_id": str(uuid4())},
+        files={"file": ("fixture.pdf", io.BytesIO(b"not a pdf"), "application/pdf")},
+    )
+
+    assert response.status_code == 422
+    assert repository.runs == []
+
+
+def test_withheld_values_are_recorded_but_only_verified_evidence_becomes_evidence_rows():
+    # Built by the real evidence checks: one value verifies, one doesn't.
+    pages = [{"file_name": "fixture.pdf", "page_number": 1, "text": "Asking Price: $1,000,000.\nNOI: $650,000."}]
+    output = REPEExtractionOutput.model_validate(
+        full_output(
+            asking_price=1_000_000,
+            noi=700_000,
+            evidence=[
+                evidence("asking_price", 1_000_000, "Asking Price: $1,000,000."),
+                evidence("noi", 700_000, "NOI: $650,000."),
+            ],
+        )
+    )
+    profile = enforce_integrity(output, pages)
+    calls = []
+
+    class FakeRpc:
+        def execute(self):
+            return type("Response", (), {"data": str(uuid4())})()
+
+    class FakeClient:
+        def rpc(self, name, params):
+            calls.append(params)
+            return FakeRpc()
+
+    SupabaseExtractionRunRepository(_settings(), client=FakeClient()).record(_record(profile=profile))
+
+    recorded = calls[0]["run"]["profile"]
+    # The whole profile snapshot keeps the withheld value for review...
+    assert recorded["withheld_values"][0]["proposed_value"] == 700_000
+    assert recorded["withheld_values"][0]["reason"] == "value_not_in_snippet"
+    assert recorded["noi"] is None
+    # ...but record_extraction_run() builds extraction_evidence rows from
+    # profile.evidence, which holds only the citation that verified.
+    assert [(entry["field_name"], entry["verification"]) for entry in recorded["evidence"]] == [
+        ("asking_price", "value_matched")
+    ]

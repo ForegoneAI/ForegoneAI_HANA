@@ -1,10 +1,10 @@
 import hashlib
-import tempfile
+import logging
 import time
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, NoReturn, Optional
 from uuid import UUID, uuid4
 
 from fastapi import Body, FastAPI, Form, Header, HTTPException, UploadFile
@@ -12,23 +12,31 @@ from pydantic import BaseModel
 
 from backend.app.h9n.extraction.repe_extractor import (
     DEFAULT_MODEL,
+    ExtractionConfigurationError,
+    ExtractionError,
+    ExtractionInputError,
+    ExtractionOutputError,
+    ExtractionRefusedError,
+    ExtractionUnavailableError,
     apply_reviewer_feedback,
     extract_repe_deal,
     extraction_input_sha256,
     extraction_prompt_sha256,
-    merge_evidence,
+    feedback_updates,
 )
 from backend.app.h9n.extraction.run_repository import (
     ExtractionRunRecord,
     SupabaseExtractionRunRepository,
 )
-from backend.app.h9n.ingestion.pdf_reader import read_pdf
+from backend.app.h9n.ingestion.pdf_reader import MAX_UPLOAD_BYTES, PdfReadError, read_pdf_bytes
 from backend.app.h9n.rag.api import require_internal_rag_access
 from backend.app.h9n.rag.api import router as rag_router
 from backend.app.h9n.rag.config import RagConfigurationError, get_rag_settings
 from backend.app.h9n.review.store import DealNotFoundError, DealStore
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 
+
+logger = logging.getLogger(__name__)
 
 # Creates the main FastAPI application for HANA
 app = FastAPI()
@@ -95,35 +103,42 @@ def test_repe_deal(deal: REPEDealProfile):
 # (see run_repository.py). Recording writes into that tenant's data with the
 # service role, so until real user auth exists it requires the same internal
 # operator key as the RAG routes.
+#
+# Milestone 1.1: every failure comes back as a controlled error with a safe
+# message - 422 for a file or document that can't be extracted, 502 when the
+# model's output was unusable or refused, 503 when the provider is down or
+# H9N isn't configured, 413 for an oversized upload - never a raw stack trace
+# or model output. A profile that is returned has only verified values in its
+# fields; anything the model couldn't back up is null there and listed in
+# `withheld_values`.
 @app.post("/api/h9n/repe/extract", response_model=ExtractResponse)
 def extract_repe_deal_from_upload(
     file: UploadFile,
     organization_id: Optional[UUID] = Form(None),
     x_h9n_api_key: Optional[str] = Header(default=None, alias="X-H9N-API-Key"),
 ) -> ExtractResponse:
-    if file.content_type not in ("application/pdf", None) and not file.filename.lower().endswith(".pdf"):
+    source_filename = Path(file.filename or "upload.pdf").name
+    if file.content_type not in ("application/pdf", None) and not source_filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF deal packages are supported right now.")
 
     if organization_id is not None:
         require_internal_rag_access(x_h9n_api_key)
 
-    file_bytes = file.file.read()
+    # Read at most one byte past the limit, so an oversized upload is never
+    # held in memory whole.
+    file_bytes = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"PDFs may be at most {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+        )
 
-    # read_pdf() takes a file path, so the upload is written to a temp file
-    # (auto-deleted once the request finishes) rather than re-implementing
-    # PDF parsing from an in-memory stream.
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
-        tmp.write(file_bytes)
-        tmp.flush()
-
-        pages = read_pdf(tmp.name)
-        if not pages:
-            raise HTTPException(status_code=422, detail="No text could be extracted from the uploaded PDF.")
-
-        # The temp file's name is meaningless to the reviewer, so the
-        # original uploaded filename is swapped back in for provenance.
-        for page in pages:
-            page["file_name"] = Path(file.filename).name
+    # Pages carry the uploaded filename (not a temp path) so citations make
+    # sense to a reviewer. A file that can't be read fails here, before any
+    # model call, so there is no extraction run to record.
+    try:
+        pages = read_pdf_bytes(file_bytes, source_filename)
+    except PdfReadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     deal_id = uuid4().hex
     started_at = datetime.now(timezone.utc)
@@ -144,7 +159,7 @@ def extract_repe_deal_from_upload(
                 status="failed" if error else "succeeded",
                 model=DEFAULT_MODEL,
                 prompt_sha256=extraction_prompt_sha256(),
-                source_filename=Path(file.filename).name,
+                source_filename=source_filename,
                 source_sha256=hashlib.sha256(file_bytes).hexdigest(),
                 input_sha256=extraction_input_sha256(pages),
                 page_count=len(pages),
@@ -157,10 +172,8 @@ def extract_repe_deal_from_upload(
             )
         )
 
-    if isinstance(error, ValueError):
-        raise HTTPException(status_code=502, detail=str(error)) from error
     if error is not None:
-        raise error
+        _raise_extraction_error(error)
 
     _review_store.save(deal, deal_id)
     # So a reviewer's future rejection feedback has something to re-derive
@@ -169,6 +182,33 @@ def extract_repe_deal_from_upload(
     # out, never one Claude re-derives from the source text.
     _review_store.save_pages(deal_id, pages)
     return ExtractResponse(deal_id=deal_id, profile=deal, extraction_run_id=extraction_run_id)
+
+
+def _raise_extraction_error(error: Exception, *, prefix: str = "") -> NoReturn:
+    """Maps an extraction failure to a controlled HTTP error (Milestone 1.1).
+    ExtractionError messages are written to be safe for callers; anything
+    unexpected gets a generic message so internals never leak, and is logged
+    with its traceback so it isn't lost. `prefix` tells the caller what was
+    already saved before the failure."""
+    if isinstance(error, ExtractionInputError):
+        raise HTTPException(status_code=422, detail=prefix + str(error)) from error
+    if isinstance(error, (ExtractionOutputError, ExtractionRefusedError)):
+        raise HTTPException(status_code=502, detail=prefix + str(error)) from error
+    if isinstance(error, ExtractionUnavailableError):
+        raise HTTPException(status_code=503, detail=prefix + str(error)) from error
+    if isinstance(error, ExtractionConfigurationError):
+        # The specific cause (missing key, unknown model) belongs in the
+        # server log, not in a response to a caller.
+        logger.error("H9N extraction is misconfigured: %s", error)
+        raise HTTPException(
+            status_code=503, detail=prefix + "The extraction service is not configured. Contact the H9N team."
+        ) from error
+    logger.exception("Unexpected H9N extraction failure", exc_info=error)
+    if isinstance(error, ValueError):
+        raise HTTPException(
+            status_code=502, detail=prefix + "The extraction did not produce a usable result."
+        ) from error
+    raise HTTPException(status_code=500, detail=prefix + "Unexpected extraction failure.") from error
 
 
 def _record_extraction_run(run: ExtractionRunRecord) -> UUID:
@@ -225,6 +265,14 @@ def correct_repe_deal(deal_id: str, corrections: dict[str, Any] = Body(...)) -> 
 # If there's no source text to re-derive from, or Claude can't confidently
 # derive a fix from the feedback, the rejection and feedback are still
 # recorded - the reviewer can always fall back to PATCH-ing an exact value.
+#
+# Milestone 1.1: a correction is held to the same standard as an extraction.
+# Claude can only change deal value fields (never review_status,
+# withheld_values or evidence directly), and a corrected value is applied only
+# if its citation verifies; otherwise it is added to withheld_values for the
+# reviewer. If the correction step itself fails (provider down, unusable
+# output), the response is a controlled 502/503 that says the rejection and
+# feedback were still saved.
 @app.post("/api/h9n/repe/deals/{deal_id}/review", response_model=REPEDealProfile)
 def review_repe_deal(deal_id: str, review: ReviewRequest) -> REPEDealProfile:
     try:
@@ -247,19 +295,15 @@ def review_repe_deal(deal_id: str, review: ReviewRequest) -> REPEDealProfile:
     try:
         pages = _review_store.get_pages(deal_id)
         result = apply_reviewer_feedback(pages, deal, review.feedback)
-    except ValueError:
-        # Claude couldn't confidently derive a fix (or returned nothing
-        # usable) - leave the rejection + feedback recorded as-is rather
-        # than failing the whole request.
-        return deal
+    except ExtractionError as exc:
+        _raise_extraction_error(
+            exc, prefix="The rejection and feedback were saved, but the automatic correction failed: "
+        )
 
-    if result["corrections"]:
-        deal = _review_store.apply_corrections(deal_id, result["corrections"])
-        if result["updated_evidence"]:
-            merged_evidence = merge_evidence(deal.evidence, result["updated_evidence"])
-            deal = _review_store.apply_corrections(deal_id, {"evidence": merged_evidence})
-        # Something changed automatically - it needs a human to look again,
-        # not to sit marked "rejected" as if nothing happened.
-        deal = _review_store.apply_corrections(deal_id, {"review_status": "pending"})
-
+    # One save: the verified corrections, their new citations, the updated
+    # withheld list, and "pending" so a human looks again. {} when Claude
+    # found nothing it could correct - the rejection then stands as submitted.
+    updates = feedback_updates(deal, result)
+    if updates:
+        deal = _review_store.apply_corrections(deal_id, updates)
     return deal

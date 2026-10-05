@@ -53,7 +53,7 @@ from pathlib import Path
 from backend.app.h9n.extraction.repe_extractor import (
     apply_reviewer_feedback,
     extract_repe_deal,
-    merge_evidence,
+    feedback_updates,
 )
 from backend.app.h9n.ingestion.pdf_reader import read_pdf
 from backend.app.h9n.review.store import DealStore
@@ -101,6 +101,7 @@ def main() -> None:
     print(f"Missing:     {deal.missing_information or '(none)'}")
     print(f"Conflicting: {deal.conflicting_information or '(none)'}")
     print(f"Uncertain:   {deal.uncertain_information or '(none)'}")
+    print(f"Withheld:    {[(w.field_name, w.proposed_value, w.reason) for w in deal.withheld_values] or '(none)'}")
 
     _section("ITEM 4 - HUMAN REVIEW AND CORRECTION")
     store = DealStore()
@@ -172,19 +173,18 @@ def main() -> None:
                     print(f"(couldn't derive a correction from that feedback: {exc})")
                 else:
                     print(f"Explanation: {result['explanation']}")
-                    if not result["corrections"]:
+                    updates = feedback_updates(reviewed, result)
+                    if not updates:
                         print("(Claude didn't find a field it could confidently correct)")
                     else:
-                        reviewed = store.apply_corrections(deal_id, result["corrections"])
-                        print(f"Applied correction: {result['corrections']}")
+                        # Verified corrections, their citations, any unverified
+                        # proposals (withheld), and back to "pending" for
+                        # another look - the same single update the API applies.
+                        reviewed = store.apply_corrections(deal_id, updates)
+                        print(f"Applied correction: {result['corrections'] or '(none verified)'}")
+                        if result["withheld"]:
+                            print(f"Withheld (couldn't verify): {[w.field_name for w in result['withheld']]}")
                         print(f"corrected_fields now shows: {reviewed.corrected_fields}")
-                        if result["updated_evidence"]:
-                            merged_evidence = merge_evidence(reviewed.evidence, result["updated_evidence"])
-                            reviewed = store.apply_corrections(deal_id, {"evidence": merged_evidence})
-                        # Something just changed automatically - it needs
-                        # another look, not to sit "rejected" as if nothing
-                        # happened.
-                        reviewed = store.apply_corrections(deal_id, {"review_status": "pending"})
                         print(f"review_status is now {reviewed.review_status!r} (ready for another look)")
 
     _section("ITEMS 5-7 - GROUND-TRUTH AND HOLDOUT EVALUATION")

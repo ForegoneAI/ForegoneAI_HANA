@@ -48,7 +48,7 @@ def main() -> None:
             print(f"  - {note}")
 
     if deal.evidence:
-        print("\nSource evidence (where each important field came from):")
+        print("\nSource evidence (where each stored value came from):")
         for item in deal.evidence:
             print(f"  - {item.field_name} = {item.value!r}")
             print(f"      {item.source_document}, page {item.page_number}: \"{item.snippet}\"")
@@ -57,6 +57,11 @@ def main() -> None:
         print("\nUncertain values flagged by the model (worth double-checking first):")
         for note in deal.uncertain_information:
             print(f"  - {note}")
+
+    if deal.withheld_values:
+        print("\nValues withheld for review (left null - evidence missing, unverifiable, or flagged):")
+        for item in deal.withheld_values:
+            print(f"  - {item.field_name} = {item.proposed_value!r} [{item.reason}] {item.detail}")
 
 
 if __name__ == "__main__":
