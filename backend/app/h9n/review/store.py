@@ -39,6 +39,7 @@ _TRACKING_FIELDS = {
     "conflicting_information",
     "evidence",
     "uncertain_information",
+    "withheld_values",
     "corrected_fields",
     "review_status",
     "review_feedback",

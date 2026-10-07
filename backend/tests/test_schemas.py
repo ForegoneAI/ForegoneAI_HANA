@@ -9,7 +9,7 @@ running code themselves.
 import pydantic
 import pytest
 
-from backend.app.h9n.schemas.base_deal import FieldEvidence
+from backend.app.h9n.schemas.base_deal import FieldEvidence, WithheldValue
 from backend.app.h9n.schemas.pe_deal import PEDealProfile
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 
@@ -107,3 +107,40 @@ def test_assignment_is_validated_so_a_bad_correction_is_rejected():
 
     with pytest.raises(pydantic.ValidationError):
         deal.asking_price = "not a number"
+
+
+def test_withheld_values_starts_empty():
+    deal = REPEDealProfile(deal_name="Fixture Deal")
+
+    assert deal.withheld_values == []
+
+
+def test_a_withheld_value_keeps_its_proposed_value_reason_and_citation():
+    # Milestone 1.1: an unverified value waits here, with its field left
+    # null, until a reviewer accepts or dismisses it.
+    deal = REPEDealProfile(
+        withheld_values=[
+            WithheldValue(
+                field_name="cap_rate",
+                proposed_value=6.5,
+                reason="snippet_not_on_page",
+                detail="The quoted snippet was not found on page 2.",
+                evidence=FieldEvidence(field_name="cap_rate", value="6.5", page_number=2, snippet="Cap rate 6.5%"),
+            )
+        ]
+    )
+
+    withheld = deal.withheld_values[0]
+    assert deal.cap_rate is None
+    assert (withheld.proposed_value, withheld.reason, withheld.evidence.page_number) == (6.5, "snippet_not_on_page", 2)
+
+
+def test_a_withheld_value_needs_a_known_reason():
+    with pytest.raises(pydantic.ValidationError):
+        WithheldValue(field_name="noi", proposed_value=1, reason="looked_wrong", detail="x")
+
+
+def test_a_profile_saved_before_withheld_values_existed_still_loads():
+    deal = REPEDealProfile.model_validate({"deal_name": "Old Deal", "evidence": [], "review_status": "approved"})
+
+    assert deal.withheld_values == []
