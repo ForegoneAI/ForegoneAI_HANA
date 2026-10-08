@@ -23,6 +23,7 @@ from backend.app.h9n.extraction.repe_extractor import (
 from backend.app.h9n.review.store import DealStore
 from backend.app.h9n.schemas.base_deal import WithheldValue
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
+from backend.tests.auth_fakes import TEST_ORGANIZATION_ID
 from backend.tests.extraction_fakes import evidence, fake_client, tool_response
 
 
@@ -398,6 +399,7 @@ def test_review_endpoint_rejected_with_feedback_but_no_saved_pages_skips_correct
     monkeypatch.setattr(main, "apply_reviewer_feedback", fail_if_called)
 
     deal_id = main._review_store.save(REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000))
+    main._review_store.save_owner(deal_id, TEST_ORGANIZATION_ID)
 
     client = TestClient(main.app)
     review_response = client.post(
@@ -621,6 +623,7 @@ def _saved_deal_for_feedback() -> str:
     )
     deal_id = main._review_store.save(deal)
     main._review_store.save_pages(deal_id, _FEEDBACK_PAGES)
+    main._review_store.save_owner(deal_id, TEST_ORGANIZATION_ID)
     return deal_id
 
 
