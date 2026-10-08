@@ -1,9 +1,9 @@
 """Tests for Milestone 1.3 - persisting extraction runs.
 
 Supabase is replaced with fakes, so these run in CI without credentials. They
-check that every extraction attempt made on behalf of an organization is
-recorded with its model, prompt, input fingerprints, and outcome, and that
-nothing untraceable is ever returned to the caller.
+check that every extraction attempt is recorded for the signed-in user's
+organization with its model, prompt, input fingerprints, and outcome, and
+that nothing untraceable is ever returned to the caller.
 """
 
 import io
@@ -27,11 +27,11 @@ from backend.app.h9n.extraction.run_repository import (
     ExtractionRunRecord,
     SupabaseExtractionRunRepository,
 )
-from backend.app.h9n.rag import api
 from backend.app.h9n.rag.config import RagSettings
 from backend.app.h9n.review.store import DealStore
 from backend.app.h9n.schemas.base_deal import FieldEvidence
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
+from backend.tests.auth_fakes import OTHER_ORGANIZATION_ID, TEST_ORGANIZATION_ID, FakeRunRepository
 from backend.tests.extraction_fakes import evidence, full_output
 
 
@@ -40,7 +40,6 @@ def _settings() -> RagSettings:
         openrouter_api_key="test-openrouter-key",
         supabase_url="https://example.supabase.co",
         supabase_service_role_key="test-service-key",
-        internal_api_key="test-internal-key",
         embedding_model="test-model",
         embedding_dimensions=3,
         openrouter_referer=None,
@@ -98,34 +97,17 @@ def _record(**overrides) -> ExtractionRunRecord:
     return ExtractionRunRecord(**values)
 
 
-class FakeRunRepository:
-    def __init__(self, *, fail: bool = False):
-        self.runs: list[ExtractionRunRecord] = []
-        self.run_id = uuid4()
-        self._fail = fail
-
-    def record(self, run: ExtractionRunRecord) -> UUID:
-        if self._fail:
-            raise RuntimeError("database unavailable")
-        self.runs.append(run)
-        return self.run_id
-
-
 @pytest.fixture
-def repository(tmp_path, monkeypatch) -> FakeRunRepository:
-    fake = FakeRunRepository()
+def repository(tmp_path, monkeypatch, run_repository) -> FakeRunRepository:
+    """The shared fake run store (see conftest.py), plus a throwaway deal store."""
     monkeypatch.setattr(main, "_review_store", DealStore(tmp_path / "reviews"))
-    monkeypatch.setattr(main, "get_extraction_run_repository", lambda: fake)
-    monkeypatch.setattr(api, "get_rag_settings", _settings)
-    return fake
+    return run_repository
 
 
-def _post_extract(organization_id=None, api_key="test-internal-key"):
-    headers = {"X-H9N-API-Key": api_key} if api_key else {}
+def _post_extract(organization_id=None):
     data = {"organization_id": str(organization_id)} if organization_id else {}
     return TestClient(main.app).post(
         "/api/h9n/repe/extract",
-        headers=headers,
         data=data,
         files={
             "file": (
@@ -187,7 +169,7 @@ def test_prompt_fingerprint_is_stable_and_input_fingerprint_tracks_the_text():
 
 def test_extract_records_a_succeeded_run_for_an_organization(repository, monkeypatch):
     monkeypatch.setattr(main, "extract_repe_deal", lambda pages: _profile())
-    organization_id = uuid4()
+    organization_id = TEST_ORGANIZATION_ID
 
     response = _post_extract(organization_id)
 
@@ -212,7 +194,7 @@ def test_extract_records_a_failed_run_and_still_reports_the_error(repository, mo
 
     monkeypatch.setattr(main, "extract_repe_deal", failing_extract)
 
-    response = _post_extract(uuid4())
+    response = _post_extract()
 
     assert response.status_code == 502
     run = repository.runs[0]
@@ -221,24 +203,23 @@ def test_extract_records_a_failed_run_and_still_reports_the_error(repository, mo
     assert run.error_type == "ValueError"
 
 
-def test_extract_without_an_organization_does_not_record_a_run(repository, monkeypatch):
+def test_extract_without_an_organization_records_the_run_for_the_users_only_one(repository, monkeypatch):
     monkeypatch.setattr(main, "extract_repe_deal", lambda pages: _profile())
 
-    response = _post_extract(organization_id=None, api_key=None)
+    response = _post_extract(organization_id=None)
 
     assert response.status_code == 200
-    assert response.json()["extraction_run_id"] is None
-    assert repository.runs == []
+    assert response.json()["extraction_run_id"] == str(repository.run_id)
+    assert repository.runs[0].organization_id == TEST_ORGANIZATION_ID
 
 
-def test_extract_for_an_organization_requires_the_internal_api_key(repository, monkeypatch):
+def test_extract_for_an_organization_the_user_is_not_in_is_refused_before_extracting(repository, monkeypatch):
     def fail_if_called(pages):
-        raise AssertionError("extraction should not run without a valid key")
+        raise AssertionError("extraction should not run for another organization")
 
     monkeypatch.setattr(main, "extract_repe_deal", fail_if_called)
 
-    assert _post_extract(uuid4(), api_key=None).status_code == 401
-    assert _post_extract(uuid4(), api_key="wrong-key").status_code == 403
+    assert _post_extract(OTHER_ORGANIZATION_ID).status_code == 403
     assert repository.runs == []
 
 
@@ -246,10 +227,9 @@ def test_extract_returns_nothing_when_the_run_cannot_be_recorded(tmp_path, monke
     store = DealStore(tmp_path / "reviews")
     monkeypatch.setattr(main, "_review_store", store)
     monkeypatch.setattr(main, "get_extraction_run_repository", lambda: FakeRunRepository(fail=True))
-    monkeypatch.setattr(api, "get_rag_settings", _settings)
     monkeypatch.setattr(main, "extract_repe_deal", lambda pages: _profile())
 
-    response = _post_extract(uuid4())
+    response = _post_extract()
 
     assert response.status_code == 502
     assert "database unavailable" not in response.text
@@ -272,7 +252,7 @@ def test_extract_records_the_specific_failure_type(repository, monkeypatch, erro
 
     monkeypatch.setattr(main, "extract_repe_deal", failing_extract)
 
-    response = _post_extract(uuid4())
+    response = _post_extract()
 
     assert response.status_code == status_code
     run = repository.runs[0]
@@ -286,8 +266,6 @@ def test_an_unreadable_upload_is_rejected_before_a_run_exists(repository, monkey
 
     response = TestClient(main.app).post(
         "/api/h9n/repe/extract",
-        headers={"X-H9N-API-Key": "test-internal-key"},
-        data={"organization_id": str(uuid4())},
         files={"file": ("fixture.pdf", io.BytesIO(b"not a pdf"), "application/pdf")},
     )
 

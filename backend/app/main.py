@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any, Literal, NoReturn, Optional
 from uuid import UUID, uuid4
 
-from fastapi import Body, FastAPI, Form, Header, HTTPException, UploadFile
+from fastapi import Body, Depends, FastAPI, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from backend.app.h9n.auth import AuthenticatedUser, get_current_user, resolve_organization
 from backend.app.h9n.extraction.repe_extractor import (
     DEFAULT_MODEL,
     ExtractionConfigurationError,
@@ -29,7 +30,6 @@ from backend.app.h9n.extraction.run_repository import (
     SupabaseExtractionRunRepository,
 )
 from backend.app.h9n.ingestion.pdf_reader import MAX_UPLOAD_BYTES, PdfReadError, read_pdf_bytes
-from backend.app.h9n.rag.api import require_internal_rag_access
 from backend.app.h9n.rag.api import router as rag_router
 from backend.app.h9n.rag.config import RagConfigurationError, get_rag_settings
 from backend.app.h9n.review.store import DealNotFoundError, DealStore
@@ -56,12 +56,12 @@ def get_extraction_run_repository() -> SupabaseExtractionRunRepository:
 
 
 # What POST /extract returns: the extracted profile plus the id it was
-# saved under, so the caller can look it up again later for review.
-# extraction_run_id is only set when the run was recorded in Supabase.
+# saved under, so the caller can look it up again later for review, and the
+# id of the extraction run recorded for it in Supabase (Milestone 1.3).
 class ExtractResponse(BaseModel):
     deal_id: str
     profile: REPEDealProfile
-    extraction_run_id: Optional[UUID] = None
+    extraction_run_id: UUID
 
 
 # What a reviewer submits to POST /deals/{deal_id}/review. Only "approved"
@@ -98,11 +98,10 @@ def test_repe_deal(deal: REPEDealProfile):
 # review store (item 4) so it can be fetched and corrected later by the
 # returned deal_id, instead of only existing in this one response.
 #
-# Milestone 1.3: when an organization_id is supplied, every attempt -
-# successful or failed - is also recorded as an extraction run in Supabase
-# (see run_repository.py). Recording writes into that tenant's data with the
-# service role, so until real user auth exists it requires the same internal
-# operator key as the RAG routes.
+# Milestone 1.3 / 2.5: the caller must be signed in, and every attempt -
+# successful or failed - is recorded as an extraction run for their
+# organization in Supabase (see run_repository.py). organization_id is only
+# needed when the caller belongs to more than one organization.
 #
 # Milestone 1.1: every failure comes back as a controlled error with a safe
 # message - 422 for a file or document that can't be extracted, 502 when the
@@ -115,14 +114,13 @@ def test_repe_deal(deal: REPEDealProfile):
 def extract_repe_deal_from_upload(
     file: UploadFile,
     organization_id: Optional[UUID] = Form(None),
-    x_h9n_api_key: Optional[str] = Header(default=None, alias="X-H9N-API-Key"),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> ExtractResponse:
     source_filename = Path(file.filename or "upload.pdf").name
     if file.content_type not in ("application/pdf", None) and not source_filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF deal packages are supported right now.")
 
-    if organization_id is not None:
-        require_internal_rag_access(x_h9n_api_key)
+    organization_id = resolve_organization(user, organization_id)
 
     # Read at most one byte past the limit, so an oversized upload is never
     # held in memory whole.
@@ -150,32 +148,31 @@ def extract_repe_deal_from_upload(
     except Exception as exc:  # Recorded as a failed run below, then re-raised.
         error = exc
 
-    extraction_run_id = None
-    if organization_id is not None:
-        extraction_run_id = _record_extraction_run(
-            ExtractionRunRecord(
-                organization_id=organization_id,
-                deal_id=deal_id,
-                status="failed" if error else "succeeded",
-                model=DEFAULT_MODEL,
-                prompt_sha256=extraction_prompt_sha256(),
-                source_filename=source_filename,
-                source_sha256=hashlib.sha256(file_bytes).hexdigest(),
-                input_sha256=extraction_input_sha256(pages),
-                page_count=len(pages),
-                profile=deal,
-                error_type=type(error).__name__ if error else None,
-                error_message=str(error)[:2000] if error else None,
-                started_at=started_at,
-                completed_at=datetime.now(timezone.utc),
-                latency_ms=round((time.perf_counter() - started) * 1000),
-            )
+    extraction_run_id = _record_extraction_run(
+        ExtractionRunRecord(
+            organization_id=organization_id,
+            deal_id=deal_id,
+            status="failed" if error else "succeeded",
+            model=DEFAULT_MODEL,
+            prompt_sha256=extraction_prompt_sha256(),
+            source_filename=source_filename,
+            source_sha256=hashlib.sha256(file_bytes).hexdigest(),
+            input_sha256=extraction_input_sha256(pages),
+            page_count=len(pages),
+            profile=deal,
+            error_type=type(error).__name__ if error else None,
+            error_message=str(error)[:2000] if error else None,
+            started_at=started_at,
+            completed_at=datetime.now(timezone.utc),
+            latency_ms=round((time.perf_counter() - started) * 1000),
         )
+    )
 
     if error is not None:
         _raise_extraction_error(error)
 
     _review_store.save(deal, deal_id)
+    _review_store.save_owner(deal_id, organization_id)
     # So a reviewer's future rejection feedback has something to re-derive
     # a correction from (see the review endpoint below) - without this, a
     # correction could only ever be the exact value a human already worked
@@ -225,10 +222,19 @@ def _record_extraction_run(run: ExtractionRunRecord) -> UUID:
         ) from exc
 
 
+def _require_deal_access(deal_id: str, user: AuthenticatedUser) -> None:
+    """404s unless the deal belongs to one of the caller's organizations
+    (Milestone 2.5). Another organization's deal gets the same response as a
+    deal that doesn't exist, so its existence isn't revealed."""
+    if _review_store.owner_of(deal_id) not in user.organization_ids:
+        raise HTTPException(status_code=404, detail=f"No deal found with id {deal_id!r}.")
+
+
 # Milestone 1, item 4: fetch a previously extracted deal by id, e.g. to show
 # it to a reviewer in a UI.
 @app.get("/api/h9n/repe/deals/{deal_id}", response_model=REPEDealProfile)
-def get_repe_deal(deal_id: str) -> REPEDealProfile:
+def get_repe_deal(deal_id: str, user: AuthenticatedUser = Depends(get_current_user)) -> REPEDealProfile:
+    _require_deal_access(deal_id, user)
     try:
         return _review_store.get(deal_id)
     except DealNotFoundError:
@@ -240,7 +246,12 @@ def get_repe_deal(deal_id: str) -> REPEDealProfile:
 # recorded in the deal's own corrected_fields list so it's visible later
 # which values were human-verified rather than model-extracted.
 @app.patch("/api/h9n/repe/deals/{deal_id}", response_model=REPEDealProfile)
-def correct_repe_deal(deal_id: str, corrections: dict[str, Any] = Body(...)) -> REPEDealProfile:
+def correct_repe_deal(
+    deal_id: str,
+    corrections: dict[str, Any] = Body(...),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> REPEDealProfile:
+    _require_deal_access(deal_id, user)
     try:
         return _review_store.apply_corrections(deal_id, corrections)
     except DealNotFoundError:
@@ -274,7 +285,12 @@ def correct_repe_deal(deal_id: str, corrections: dict[str, Any] = Body(...)) -> 
 # output), the response is a controlled 502/503 that says the rejection and
 # feedback were still saved.
 @app.post("/api/h9n/repe/deals/{deal_id}/review", response_model=REPEDealProfile)
-def review_repe_deal(deal_id: str, review: ReviewRequest) -> REPEDealProfile:
+def review_repe_deal(
+    deal_id: str,
+    review: ReviewRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> REPEDealProfile:
+    _require_deal_access(deal_id, user)
     try:
         deal = _review_store.set_review_status(deal_id, review.status)
     except DealNotFoundError:

@@ -6,7 +6,7 @@ This is a source-cited retrieval layer for future H9N institutional memory. It i
 
 1. Create a Supabase project.
 2. Apply [`supabase/migrations/20260921_create_h9n_rag.sql`](../supabase/migrations/20260921_create_h9n_rag.sql) in the Supabase SQL Editor or with the Supabase CLI.
-3. Copy `.env.example` to `.env` if it does not already exist, then set real values for `OPENROUTER_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `H9N_RAG_INTERNAL_API_KEY`.
+3. Copy `.env.example` to `.env` if it does not already exist, then set real values for `OPENROUTER_API_KEY`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`.
 4. Activate the local environment and start the API:
 
 ```bash
@@ -18,14 +18,14 @@ The default route uses OpenRouter's `openai/text-embedding-3-small` with 1,536 d
 
 ## API
 
-All RAG endpoints require the internal-only `X-H9N-API-Key` header. This is a safe development gate, **not customer authentication**. Before exposing these endpoints to customers, replace it with Supabase JWT validation and derive `organization_id` from the authenticated membership rather than accepting it from the request body.
+All RAG endpoints require a signed-in Supabase user, sent as `Authorization: Bearer <token>` (see "Signing in" in the [backend README](./README.md)). The `organization_id` in each request must be one of that user's organizations, or the request gets a 403, so a user can only index into or search their own organization's corpus.
 
 ### Ingest page-preserved text
 
 ```bash
 curl -X POST http://localhost:8000/api/h9n/rag/documents/text \
   -H "Content-Type: application/json" \
-  -H "X-H9N-API-Key: $H9N_RAG_INTERNAL_API_KEY" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{
     "organization_id": "11111111-1111-1111-1111-111111111111",
     "document_name": "investment-criteria.md",
@@ -39,7 +39,7 @@ curl -X POST http://localhost:8000/api/h9n/rag/documents/text \
 
 ```bash
 curl -X POST http://localhost:8000/api/h9n/rag/documents/pdf \
-  -H "X-H9N-API-Key: $H9N_RAG_INTERNAL_API_KEY" \
+  -H "Authorization: Bearer $TOKEN" \
   -F "organization_id=11111111-1111-1111-1111-111111111111" \
   -F "source_type=deal_package" \
   -F "file=@deal-package.pdf;type=application/pdf"
@@ -52,7 +52,7 @@ Text-based PDFs are stored in the private Supabase bucket and chunked without cr
 ```bash
 curl -X POST http://localhost:8000/api/h9n/rag/search \
   -H "Content-Type: application/json" \
-  -H "X-H9N-API-Key: $H9N_RAG_INTERNAL_API_KEY" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{
     "organization_id": "11111111-1111-1111-1111-111111111111",
     "query": "What evidence supports the stated cap rate?",

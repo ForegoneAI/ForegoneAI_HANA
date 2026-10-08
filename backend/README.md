@@ -320,18 +320,23 @@ is given, so run the generator once before trying that with no arguments too.
 
 ## How to use it from the API
 
-`main.py` has four endpoints for this. Upload a PDF and you get back the filled-in deal profile,
-plus an id you can use to fetch, correct, or review it later:
+Every endpoint except `/` needs a signed-in user (see "Signing in" below). The examples assume
+your access token is in `$TOKEN`.
+
+Upload a PDF and you get back the filled-in deal profile, plus an id you can use to fetch,
+correct, or review it later:
 
 ```bash
 curl -X POST http://localhost:8000/api/h9n/repe/extract \
+  -H "Authorization: Bearer $TOKEN" \
   -F "file=@taberna_cim.pdf"
 ```
 
 ```json
 {
   "deal_id": "b6b6a1e2...",
-  "profile": { "deal_name": "...", "asking_price": 18500000, "evidence": [...], "...": "..." }
+  "profile": { "deal_name": "...", "asking_price": 18500000, "evidence": [...], "...": "..." },
+  "extraction_run_id": "5c1d..."
 }
 ```
 
@@ -343,13 +348,15 @@ error table under "Extraction reliability").
 Fetch that same deal again later by its id:
 
 ```bash
-curl http://localhost:8000/api/h9n/repe/deals/b6b6a1e2...
+curl http://localhost:8000/api/h9n/repe/deals/b6b6a1e2... \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 And a reviewer can correct one or more fields (see "Human review and correction" below):
 
 ```bash
 curl -X PATCH http://localhost:8000/api/h9n/repe/deals/b6b6a1e2... \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"asking_price": 9500000}'
 ```
@@ -359,6 +366,7 @@ from any individual correction:
 
 ```bash
 curl -X POST http://localhost:8000/api/h9n/repe/deals/b6b6a1e2.../review \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status": "approved"}'
 ```
@@ -366,32 +374,57 @@ curl -X POST http://localhost:8000/api/h9n/repe/deals/b6b6a1e2.../review \
 `status` only accepts `"approved"` or `"rejected"` - `"pending"` is just the starting state a
 freshly extracted deal has before anyone's reviewed it, not something you submit.
 
-The fetch, correction, and review endpoints all 404 if the id doesn't match a saved deal. A
-correction with an unknown field name or a value of the wrong type gets a 400 instead of silently
-corrupting the saved deal, and a review request with anything other than `"approved"` or
-`"rejected"` gets a 422.
+The fetch, correction, and review endpoints all 404 if the id doesn't match a saved deal - or if
+the deal belongs to an organization you're not in, so other organizations' deals can't even be
+confirmed to exist. A correction with an unknown field name or a value of the wrong type gets a
+400 instead of silently corrupting the saved deal, and a review request with anything other than
+`"approved"` or `"rejected"` gets a 422.
+
+### Signing in (Milestone 2.5)
+
+The API uses Supabase Auth. Send the access token of a signed-in Supabase user as
+`Authorization: Bearer <token>`; a missing, invalid, or expired token gets a 401. Each request
+acts for one organization the user is an active member of:
+
+- **One organization:** it's used automatically.
+- **Several organizations:** send `organization_id` (as a form field on `/extract`, or in the JSON
+  body of the RAG routes). Asking for an organization you're not in gets a 403.
+
+**Setting up a user (until there's a sign-up screen):**
+
+1. In the Supabase dashboard, go to **Authentication → Users → Add user** and create the user
+   with an email and password.
+2. In the **SQL Editor**, create an organization if needed, and add the user to it:
+
+   ```sql
+   insert into organizations (name) values ('Demo Org') returning id;
+   insert into organization_memberships (organization_id, user_id, role)
+   values ('<organization id>', '<user id from Authentication → Users>', 'analyst');
+   ```
+
+3. Get an access token. The `apikey` is the project's publishable (anon) key from **Project
+   Settings → API Keys**, not the service-role key:
+
+   ```bash
+   curl -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+     -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"email": "you@example.com", "password": "..."}'
+   ```
+
+   The `access_token` in the response is your `$TOKEN`. It expires after an hour by default; sign
+   in again for a new one.
+
+The web app will do this through `supabase-js` once its login screen exists.
 
 ### Recording extraction runs in Supabase (Milestone 1.3)
 
-To keep a permanent, traceable record of an extraction, pass an `organization_id` and the internal
-API key. The run is saved to Supabase with the model, a hash of the prompt, hashes of the PDF and
-of the text Claude saw, the profile, and its page-level evidence:
+Every extraction, successful or failed, is saved to Supabase for the signed-in user's
+organization, with the model, a hash of the prompt, hashes of the PDF and of the text Claude saw,
+the profile, and its page-level evidence. The response's `extraction_run_id` points to it.
 
-```bash
-curl -X POST http://localhost:8000/api/h9n/repe/extract \
-  -H "X-H9N-API-Key: $H9N_RAG_INTERNAL_API_KEY" \
-  -F "organization_id=11111111-1111-1111-1111-111111111111" \
-  -F "file=@taberna_cim.pdf"
-```
-
-The response then also includes an `extraction_run_id`. A few things to know:
-
-- **Without `organization_id`, nothing is recorded.** The endpoint works exactly as above, which
-  keeps local testing possible without Supabase.
-- **Failed extractions are recorded too.** If the run itself can't be saved, the request fails
-  rather than returning a result that can't be traced.
-- **The API key is a development gate, not real login.** Once Supabase user auth exists, the
-  organization should come from the logged-in user, and recording should always happen.
+- **If the run can't be saved, the request fails** rather than returning a result that can't be
+  traced.
 - **Setup:** apply `supabase/migrations/20260921_create_h9n_rag.sql` *before*
   `20260929_create_h9n_extraction_runs.sql`, and set the Supabase variables in `.env` (see
   [RAG.md](./RAG.md)). The migration's comments describe each table and column.
