@@ -37,7 +37,6 @@ class RagSettings:
     openrouter_api_key: str | None
     supabase_url: str | None
     supabase_service_role_key: str | None
-    internal_api_key: str | None
     embedding_model: str
     embedding_dimensions: int
     openrouter_referer: str | None
@@ -64,7 +63,6 @@ class RagSettings:
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
             supabase_url=os.getenv("SUPABASE_URL"),
             supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY"),
-            internal_api_key=os.getenv("H9N_RAG_INTERNAL_API_KEY"),
             embedding_model=os.getenv(
                 "H9N_RAG_EMBEDDING_MODEL", "openai/text-embedding-3-small"
             ),
@@ -84,7 +82,6 @@ class RagSettings:
             "OPENROUTER_API_KEY": self.openrouter_api_key,
             "SUPABASE_URL": self.supabase_url,
             "SUPABASE_SERVICE_ROLE_KEY": self.supabase_service_role_key,
-            "H9N_RAG_INTERNAL_API_KEY": self.internal_api_key,
         }
         # The tracked template uses readable placeholders. Treat them exactly
         # like missing secrets so the API never tries to run against a fake URL
