@@ -1,0 +1,109 @@
+[
+  {
+    "document_id": "opulent_model",
+    "path": "inputs/opulent_model.xlsx",
+    "original_name": "Foregone x Opulent (2)[6].xlsx",
+    "sha256": "7089c28df05dc118e7c40ac6dbe4931a27f6e5b1ab3c37f1e0c904a42c47e02f",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "opulent_deck",
+    "path": "inputs/opulent_deck.pdf",
+    "original_name": "Foregone x Opulent Resort Deck[81].pdf",
+    "sha256": "905e66f2a3cc5da8f5e2c6314d9c966f4e018a9e34ae74b38fc0481faa4d433e",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "opulent_investor",
+    "path": "inputs/opulent_investor.pdf",
+    "original_name": "Foregone x Opulent Resorts Investors V1 Deck[43].pdf",
+    "sha256": "6537f30516fc3d2e9daacd0b42dcb83d516ee2e0436e3ef9e3304f0804701768",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "roderick_onepager",
+    "path": "inputs/roderick_onepager.pdf",
+    "original_name": "Foregone x Roderick 1 Pager[49].pdf",
+    "sha256": "a0281bc058e58aefc7e0e5de5e9c2cddad4825f3bfec03703222448cc13873b6",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "roderick_pitch",
+    "path": "inputs/roderick_pitch.pdf",
+    "original_name": "Foregone x Roderick Builders Pitch Deck V1[20].pdf",
+    "sha256": "803843cf7b9ff475d2f179f1e1f8a0313fff6488a99fe192dc42f9c2b3895d43",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "roderick_investor",
+    "path": "inputs/roderick_investor.pdf",
+    "original_name": "Foregone x Roderick Investor Deck V2 .pdf",
+    "sha256": "1a692738231b7a2baaef591e87c87e551f937fde581da39566d9eb4917e0d251",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "roderick_investor_duplicate",
+    "path": "inputs/roderick_investor_duplicate.pdf",
+    "original_name": "Foregone x Roderick Investor Deck V2 [8].pdf",
+    "sha256": "1a692738231b7a2baaef591e87c87e551f937fde581da39566d9eb4917e0d251",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "roderick_market",
+    "path": "inputs/roderick_market.pdf",
+    "original_name": "Foregone x Roderick Market Analysis.pdf",
+    "sha256": "fa153d631c7b291f597c09aa0c3c23dceb1e8a2adf7eb5e51143d61698cba794",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "roderick_market_duplicate",
+    "path": "inputs/roderick_market_duplicate.pdf",
+    "original_name": "Foregone x Roderick Market Analysis[88].pdf",
+    "sha256": "fa153d631c7b291f597c09aa0c3c23dceb1e8a2adf7eb5e51143d61698cba794",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "roderick_model",
+    "path": "inputs/roderick_model.xlsx",
+    "original_name": "Foregone x Rodrick Modeling (5)[24].xlsx",
+    "sha256": "a26a9a5c8255a4c317414f427163f11e4c34df707fe3c04c767f41a0ba9f50c1",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "townhomes_model",
+    "path": "inputs/townhomes_model.xlsx",
+    "original_name": "Multifamily Investment ProForma[68].xlsx",
+    "sha256": "8841d318e02938740581638b594189c7705f0f202ca9a2c1fa05f61a559b40aa",
+    "origin": "user_upload"
+  },
+  {
+    "document_id": "daly_city",
+    "path": "inputs/daly_city.pdf",
+    "original_name": "daly_city.pdf",
+    "sha256": "dae3f73297bad7fe8d5a4923cfeb73a5f123bad8391ec895eacbf480b00af1d9",
+    "origin": "public_broker_om",
+    "url": "https://www.sq-commercial.com/wp-content/uploads/2025/06/414-91st-Ave-Offering-Memorandum-L.pdf",
+    "retrieved_at": "2026-10-09",
+    "note": "Historical source snapshot; not a current offering verification."
+  },
+  {
+    "document_id": "chicago",
+    "path": "inputs/chicago.pdf",
+    "original_name": "chicago.pdf",
+    "sha256": "6a90d77d33fb88fbbbbad083bcdc37052365c195b8624234eef78cae4756121f",
+    "origin": "public_broker_om",
+    "url": "https://crer.com/wp-content/uploads/2021/03/CRER_OM_2021_1743_W_north_ave.pdf",
+    "retrieved_at": "2026-10-09",
+    "note": "Historical source snapshot; not a current offering verification."
+  },
+  {
+    "document_id": "corporate_place",
+    "path": "inputs/corporate_place.pdf",
+    "original_name": "corporate_place.pdf",
+    "sha256": "e09e2144a5e1f24e3ad2331215f9cf9be4baa124c5f87cea77857eb3f68f0b6d",
+    "origin": "public_broker_om",
+    "url": "https://www.thezylberglaitgroup.com/wp-content/uploads/2019/06/1920-OM.pdf",
+    "retrieved_at": "2026-10-09",
+    "note": "Historical source snapshot; not a current offering verification."
+  }
+]

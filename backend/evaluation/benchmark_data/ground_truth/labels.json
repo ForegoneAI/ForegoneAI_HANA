@@ -1,0 +1,916 @@
+{
+  "dataset_version": "0.1.0-draft",
+  "cases": {
+    "roderick": {
+      "target_equity_raise": {
+        "status": "present",
+        "value": 20000000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "total_capital_stack": {
+        "status": "present",
+        "value": 60000000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "investor_deck_preferred_return": {
+        "status": "present",
+        "value": 0.15,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "investor_deck_duration_months": {
+        "status": "present",
+        "value": [
+          18,
+          20
+        ],
+        "unit": "months",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "pitch_term_months": {
+        "status": "present",
+        "value": [
+          18,
+          24
+        ],
+        "unit": "months",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "pitch_preferred_return": {
+        "status": "present",
+        "value": [
+          0.15,
+          0.17
+        ],
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "pitch_target_irr": {
+        "status": "present",
+        "value": 0.196,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_pitch_land_cost": {
+        "status": "present",
+        "value": 1700000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_pitch_build_cost": {
+        "status": "present",
+        "value": 4500000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_pitch_total_cost": {
+        "status": "present",
+        "value": 6200000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_pitch_sale_lower_bound": {
+        "status": "present",
+        "value": 10200000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_base_build_area": {
+        "status": "present",
+        "value": 8198,
+        "unit": "sqft",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_base_build_cost": {
+        "status": "present",
+        "value": -6148500,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_base_total_cost": {
+        "status": "present",
+        "value": -7909552,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_base_revenue": {
+        "status": "present",
+        "value": 10247500,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_base_net": {
+        "status": "present",
+        "value": 2337948,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot15_bear_net": {
+        "status": "present",
+        "value": 805885.5,
+        "unit": "USD",
+        "abs_tolerance": 0.01,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "community_base_land_outflow": {
+        "status": "present",
+        "value": -325000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "reconciled_lot15_build_cost": {
+        "status": "conflict",
+        "value": null,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null,
+        "candidates": [
+          4500000,
+          6148500
+        ]
+      },
+      "reconciled_term_months": {
+        "status": "conflict",
+        "value": null,
+        "unit": "months",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null,
+        "candidates": [
+          [
+            18,
+            20
+          ],
+          [
+            18,
+            24
+          ]
+        ]
+      },
+      "committed_bank_lender": {
+        "status": "missing",
+        "value": null,
+        "unit": "text",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "executed_loan_interest_rate": {
+        "status": "missing",
+        "value": null,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    },
+    "opulent": {
+      "land_area": {
+        "status": "present",
+        "value": 47000,
+        "unit": "sqm",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "villa_keys": {
+        "status": "present",
+        "value": 35,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "residence_keys": {
+        "status": "present",
+        "value": 33,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "hotel_keys": {
+        "status": "present",
+        "value": 40,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "total_keys": {
+        "status": "present",
+        "value": 108,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "deck_total_development_cost": {
+        "status": "present",
+        "value": 225000000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "deck_capital_raise": {
+        "status": "present",
+        "value": 125000000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "deck_lp_equity_raise": {
+        "status": "present",
+        "value": 75000000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "secured_presales": {
+        "status": "present",
+        "value": 4500000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "presale_lois": {
+        "status": "present",
+        "value": 5000000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "optional_bridge_escrow": {
+        "status": "present",
+        "value": 7500000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "deck_year5_revenue": {
+        "status": "present",
+        "value": 76750000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "deck_year5_ebitda": {
+        "status": "present",
+        "value": 44780473,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "deck_exit_valuation": {
+        "status": "present",
+        "value": 215442152,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "deck_exit_cap_rate": {
+        "status": "present",
+        "value": 0.1,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "soft_opening_year": {
+        "status": "present",
+        "value": 2028,
+        "unit": "year",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "model_occupancy": {
+        "status": "present",
+        "value": 0.65,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "model_year5_revenue": {
+        "status": "present",
+        "value": 71269900,
+        "unit": "USD",
+        "abs_tolerance": 0.01,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "model_year5_ebitda": {
+        "status": "present",
+        "value": 41274725.38666666,
+        "unit": "USD",
+        "abs_tolerance": 0.01,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "model_exit_valuation": {
+        "status": "present",
+        "value": 198245481.58947572,
+        "unit": "USD",
+        "abs_tolerance": 0.01,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "model_lp_equity_share": {
+        "status": "present",
+        "value": 0.4,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "reconciled_year5_revenue": {
+        "status": "conflict",
+        "value": null,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null,
+        "candidates": [
+          76750000,
+          71269900
+        ]
+      },
+      "reconciled_total_cost": {
+        "status": "conflict",
+        "value": null,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null,
+        "candidates": [
+          225000000,
+          75000000
+        ]
+      },
+      "executed_senior_loan_rate": {
+        "status": "missing",
+        "value": null,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "signed_land_deed_date": {
+        "status": "missing",
+        "value": null,
+        "unit": "date",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    },
+    "daly_city": {
+      "asking_price": {
+        "status": "present",
+        "value": 2100000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "building_area": {
+        "status": "present",
+        "value": 5662,
+        "unit": "sqft",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lot_area": {
+        "status": "present",
+        "value": 0.05,
+        "unit": "acres",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "units": {
+        "status": "present",
+        "value": 4,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "average_unit_area": {
+        "status": "present",
+        "value": 1408,
+        "unit": "sqft",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "year_built": {
+        "status": "present",
+        "value": 1965,
+        "unit": "year",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "parking_spaces": {
+        "status": "present",
+        "value": 6,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lp_preferred_return": {
+        "status": "missing",
+        "value": null,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lp_minimum_subscription": {
+        "status": "missing",
+        "value": null,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    },
+    "chicago": {
+      "units": {
+        "status": "present",
+        "value": 4,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "asking_price": {
+        "status": "present",
+        "value": 1700000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "current_cap_rate": {
+        "status": "present",
+        "value": 0.0587,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "proforma_cap_rate": {
+        "status": "present",
+        "value": 0.065,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "current_noi": {
+        "status": "present",
+        "value": 99813,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "proforma_noi": {
+        "status": "present",
+        "value": 110579,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "current_scheduled_gross_income": {
+        "status": "present",
+        "value": 132600,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "proforma_scheduled_gross_income": {
+        "status": "present",
+        "value": 147300,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "modeled_loan_amount": {
+        "status": "present",
+        "value": 1275000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "modeled_interest_rate": {
+        "status": "present",
+        "value": 0.0375,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "modeled_amortization_years": {
+        "status": "present",
+        "value": 30,
+        "unit": "years",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "current_debt_coverage_ratio": {
+        "status": "conflict",
+        "value": null,
+        "unit": "multiple",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null,
+        "candidates": [
+          1.41,
+          1.43
+        ]
+      },
+      "lp_preferred_return": {
+        "status": "missing",
+        "value": null,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lp_minimum_subscription": {
+        "status": "missing",
+        "value": null,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    },
+    "corporate_place": {
+      "asking_price": {
+        "status": "present",
+        "value": 26750000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "current_cap_rate": {
+        "status": "present",
+        "value": 0.0603,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "current_noi": {
+        "status": "present",
+        "value": 1613150,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "rentable_area": {
+        "status": "present",
+        "value": 68070,
+        "unit": "sqft",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "occupancy": {
+        "status": "present",
+        "value": 0.9496,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "modeled_loan_amount": {
+        "status": "present",
+        "value": 17387500,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "modeled_down_payment": {
+        "status": "present",
+        "value": 9362500,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "modeled_interest_rate": {
+        "status": "present",
+        "value": 0.0425,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "modeled_loan_term_years": {
+        "status": "present",
+        "value": 10,
+        "unit": "years",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "levered_irr": {
+        "status": "present",
+        "value": 0.1251,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "unlevered_irr": {
+        "status": "present",
+        "value": 0.0753,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "parking_spaces": {
+        "status": "present",
+        "value": 172,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lp_preferred_return": {
+        "status": "missing",
+        "value": null,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "lp_minimum_subscription": {
+        "status": "missing",
+        "value": null,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    },
+    "townhomes": {
+      "units": {
+        "status": "present",
+        "value": 10,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "monthly_market_rent": {
+        "status": "present",
+        "value": 1750,
+        "unit": "USD_per_month",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "rent_growth": {
+        "status": "present",
+        "value": 0.02,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "vacancy_credit_loss": {
+        "status": "present",
+        "value": 0.07,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "ltv": {
+        "status": "present",
+        "value": 0.7,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "unit_cost": {
+        "status": "present",
+        "value": 350000,
+        "unit": "USD",
+        "abs_tolerance": 0.01,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "loan_amount": {
+        "status": "present",
+        "value": 2450000,
+        "unit": "USD",
+        "abs_tolerance": 0.01,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "interest_rate": {
+        "status": "present",
+        "value": 0.065,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "year2026_noi": {
+        "status": "present",
+        "value": 177723,
+        "unit": "USD",
+        "abs_tolerance": 0.01,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "year2026_free_cashflow": {
+        "status": "present",
+        "value": -1031527,
+        "unit": "USD",
+        "abs_tolerance": 0.01,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "property_address": {
+        "status": "missing",
+        "value": null,
+        "unit": "text",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "sponsor_legal_name": {
+        "status": "missing",
+        "value": null,
+        "unit": "text",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    }
+  }
+}

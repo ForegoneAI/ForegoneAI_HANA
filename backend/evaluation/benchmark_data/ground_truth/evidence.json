@@ -1,0 +1,1151 @@
+{
+  "roderick": {
+    "target_equity_raise": {
+      "locations": [
+        {
+          "document_id": "roderick_investor",
+          "page": 4,
+          "note": ""
+        },
+        {
+          "document_id": "roderick_pitch",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "roderick_onepager",
+          "page": 1,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Portfolio target equity raise, not total capitalization."
+    },
+    "total_capital_stack": {
+      "locations": [
+        {
+          "document_id": "roderick_investor",
+          "page": 4,
+          "note": ""
+        }
+      ],
+      "review_note": "Total stack with leverage as stated in investor deck."
+    },
+    "investor_deck_preferred_return": {
+      "locations": [
+        {
+          "document_id": "roderick_investor",
+          "page": 4,
+          "note": ""
+        }
+      ],
+      "review_note": "Investor deck stated preferred return; no assumption that it is annualized."
+    },
+    "investor_deck_duration_months": {
+      "locations": [
+        {
+          "document_id": "roderick_investor",
+          "page": 7,
+          "note": ""
+        }
+      ],
+      "review_note": "Investor deck duration range, preserve both endpoints."
+    },
+    "pitch_term_months": {
+      "locations": [
+        {
+          "document_id": "roderick_pitch",
+          "page": 2,
+          "note": ""
+        }
+      ],
+      "review_note": "Overall term in pitch executive summary, distinct from Phase 1."
+    },
+    "pitch_preferred_return": {
+      "locations": [
+        {
+          "document_id": "roderick_pitch",
+          "page": 2,
+          "note": ""
+        }
+      ],
+      "review_note": "Preferred return range stated in pitch summary."
+    },
+    "pitch_target_irr": {
+      "locations": [
+        {
+          "document_id": "roderick_pitch",
+          "page": 10,
+          "note": ""
+        }
+      ],
+      "review_note": "Target IRR as stated, not independently validated."
+    },
+    "lot15_pitch_land_cost": {
+      "locations": [
+        {
+          "document_id": "roderick_pitch",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "lot15_pitch_build_cost": {
+      "locations": [
+        {
+          "document_id": "roderick_pitch",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "lot15_pitch_total_cost": {
+      "locations": [
+        {
+          "document_id": "roderick_pitch",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "lot15_pitch_sale_lower_bound": {
+      "locations": [
+        {
+          "document_id": "roderick_pitch",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": "Projected sell has a plus sign; this field is the lower bound, not an exact sale price."
+    },
+    "lot15_base_build_area": {
+      "locations": [
+        {
+          "document_id": "roderick_model",
+          "sheet": "Lot 15 ProForma",
+          "cell": "I9",
+          "note": ""
+        }
+      ],
+      "review_note": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+    },
+    "lot15_base_build_cost": {
+      "locations": [
+        {
+          "document_id": "roderick_model",
+          "sheet": "Lot 15 ProForma",
+          "cell": "I12",
+          "note": ""
+        }
+      ],
+      "review_note": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+    },
+    "lot15_base_total_cost": {
+      "locations": [
+        {
+          "document_id": "roderick_model",
+          "sheet": "Lot 15 ProForma",
+          "cell": "I19",
+          "note": ""
+        }
+      ],
+      "review_note": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+    },
+    "lot15_base_revenue": {
+      "locations": [
+        {
+          "document_id": "roderick_model",
+          "sheet": "Lot 15 ProForma",
+          "cell": "I25",
+          "note": ""
+        }
+      ],
+      "review_note": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+    },
+    "lot15_base_net": {
+      "locations": [
+        {
+          "document_id": "roderick_model",
+          "sheet": "Lot 15 ProForma",
+          "cell": "I27",
+          "note": ""
+        }
+      ],
+      "review_note": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+    },
+    "lot15_bear_net": {
+      "locations": [
+        {
+          "document_id": "roderick_model",
+          "sheet": "Lot 15 Bearish ProForma",
+          "cell": "I27",
+          "note": ""
+        }
+      ],
+      "review_note": "Bearish scenario, not base."
+    },
+    "community_base_land_outflow": {
+      "locations": [
+        {
+          "document_id": "roderick_model",
+          "sheet": "Luxary Community",
+          "cell": "I14",
+          "note": ""
+        }
+      ],
+      "review_note": "Use exact sheet spelling; preserve negative outflow."
+    },
+    "reconciled_lot15_build_cost": {
+      "locations": [
+        {
+          "document_id": "roderick_pitch",
+          "page": 5,
+          "note": ""
+        },
+        {
+          "document_id": "roderick_model",
+          "sheet": "Lot 15 ProForma",
+          "cell": "I12",
+          "note": ""
+        }
+      ],
+      "review_note": "Positive cost magnitude across deck and base model. No approved precedence: flag conflict and return both candidates."
+    },
+    "reconciled_term_months": {
+      "locations": [
+        {
+          "document_id": "roderick_investor",
+          "page": 7,
+          "note": ""
+        },
+        {
+          "document_id": "roderick_onepager",
+          "page": 1,
+          "note": ""
+        }
+      ],
+      "review_note": "Investor deck vs one-pager overall term; do not silently choose the shorter term."
+    },
+    "committed_bank_lender": {
+      "locations": [],
+      "review_note": "Named committed construction lender for this package; optional bank debt is not a lender name. Not found in supplied scope; domain confirmation pending."
+    },
+    "executed_loan_interest_rate": {
+      "locations": [],
+      "review_note": "Interest rate of an executed construction loan, not LP preferred return or IRR. Not found in supplied scope."
+    }
+  },
+  "opulent": {
+    "land_area": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated land area. Do not reconcile with other sources in this source-specific field."
+    },
+    "villa_keys": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated villa keys. Do not reconcile with other sources in this source-specific field."
+    },
+    "residence_keys": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated residence keys. Do not reconcile with other sources in this source-specific field."
+    },
+    "hotel_keys": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated hotel keys. Do not reconcile with other sources in this source-specific field."
+    },
+    "total_keys": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated total keys. Do not reconcile with other sources in this source-specific field."
+    },
+    "deck_total_development_cost": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 7,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 7,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated deck total development cost. Do not reconcile with other sources in this source-specific field."
+    },
+    "deck_capital_raise": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 7,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 7,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated deck capital raise. Do not reconcile with other sources in this source-specific field."
+    },
+    "deck_lp_equity_raise": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 7,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 7,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated deck lp equity raise. Do not reconcile with other sources in this source-specific field."
+    },
+    "secured_presales": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 7,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 7,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated secured presales. Do not reconcile with other sources in this source-specific field."
+    },
+    "presale_lois": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 7,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 7,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated presale lois. Do not reconcile with other sources in this source-specific field."
+    },
+    "optional_bridge_escrow": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 7,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 7,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated optional bridge escrow. Do not reconcile with other sources in this source-specific field."
+    },
+    "deck_year5_revenue": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 8,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 8,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_investor",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated deck year5 revenue. Do not reconcile with other sources in this source-specific field."
+    },
+    "deck_year5_ebitda": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 8,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 8,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated deck year5 ebitda. Do not reconcile with other sources in this source-specific field."
+    },
+    "deck_exit_valuation": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 8,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 8,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated deck exit valuation. Do not reconcile with other sources in this source-specific field."
+    },
+    "deck_exit_cap_rate": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 8,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 8,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated deck exit cap rate. Do not reconcile with other sources in this source-specific field."
+    },
+    "soft_opening_year": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 9,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 9,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Source-stated soft opening year. Do not reconcile with other sources in this source-specific field."
+    },
+    "model_occupancy": {
+      "locations": [
+        {
+          "document_id": "opulent_model",
+          "sheet": "Sheet1",
+          "cell": "L14",
+          "note": ""
+        }
+      ],
+      "review_note": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+    },
+    "model_year5_revenue": {
+      "locations": [
+        {
+          "document_id": "opulent_model",
+          "sheet": "Sheet1",
+          "cell": "J16",
+          "note": ""
+        }
+      ],
+      "review_note": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+    },
+    "model_year5_ebitda": {
+      "locations": [
+        {
+          "document_id": "opulent_model",
+          "sheet": "Sheet1",
+          "cell": "J24",
+          "note": ""
+        }
+      ],
+      "review_note": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+    },
+    "model_exit_valuation": {
+      "locations": [
+        {
+          "document_id": "opulent_model",
+          "sheet": "Sheet1",
+          "cell": "L36",
+          "note": ""
+        }
+      ],
+      "review_note": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+    },
+    "model_lp_equity_share": {
+      "locations": [
+        {
+          "document_id": "opulent_model",
+          "sheet": "Sheet1",
+          "cell": "L25",
+          "note": ""
+        }
+      ],
+      "review_note": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+    },
+    "reconciled_year5_revenue": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 8,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_model",
+          "sheet": "Sheet1",
+          "cell": "J16",
+          "note": ""
+        }
+      ],
+      "review_note": "Deck and workbook disagree; no source has approved authority."
+    },
+    "reconciled_total_cost": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 7,
+          "note": ""
+        },
+        {
+          "document_id": "opulent_investor",
+          "page": 11,
+          "note": ""
+        }
+      ],
+      "review_note": "Main capital stack vs appendix Total Cost. May be scope mismatch; flag for domain review, do not resolve."
+    },
+    "executed_senior_loan_rate": {
+      "locations": [],
+      "review_note": "Executed senior loan interest rate, not exit cap rate or preferred return; not found in supplied scope."
+    },
+    "signed_land_deed_date": {
+      "locations": [],
+      "review_note": "Date of an executed land deed; signed LOI narrative does not establish deed execution. Not found in supplied scope."
+    }
+  },
+  "daly_city": {
+    "asking_price": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "building_area": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "lot_area": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "units": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "average_unit_area": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "year_built": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "parking_spaces": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "lp_preferred_return": {
+      "locations": [],
+      "review_note": "LP preferred return, not property rent growth. Not stated in this offering memorandum."
+    },
+    "lp_minimum_subscription": {
+      "locations": [],
+      "review_note": "LP minimum subscription, not asking price. Not stated in this offering memorandum."
+    }
+  },
+  "chicago": {
+    "units": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 2,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "asking_price": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        },
+        {
+          "document_id": "chicago",
+          "page": 2,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "current_cap_rate": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "proforma_cap_rate": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "current_noi": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        },
+        {
+          "document_id": "chicago",
+          "page": 9,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "proforma_noi": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        },
+        {
+          "document_id": "chicago",
+          "page": 9,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "current_scheduled_gross_income": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        },
+        {
+          "document_id": "chicago",
+          "page": 9,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "proforma_scheduled_gross_income": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        },
+        {
+          "document_id": "chicago",
+          "page": 9,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "modeled_loan_amount": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "modeled_interest_rate": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "modeled_amortization_years": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "current_debt_coverage_ratio": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        },
+        {
+          "document_id": "chicago",
+          "page": 10,
+          "note": ""
+        }
+      ],
+      "review_note": "Same page lists 1.41 in Current indicators and 1.43 in Financing & Cash Flow. Requires domain interpretation."
+    },
+    "lp_preferred_return": {
+      "locations": [],
+      "review_note": "LP preferred return; not cash-on-cash or total property return. Not found in this OM."
+    },
+    "lp_minimum_subscription": {
+      "locations": [],
+      "review_note": "LP minimum subscription; down payment is acquisition equity, not an LP minimum. Not found in this OM."
+    }
+  },
+  "corporate_place": {
+    "asking_price": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 39,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 8,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "current_cap_rate": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "current_noi": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "rentable_area": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 39,
+          "note": "Alternative supporting location; same field scope."
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 8,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "occupancy": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 39,
+          "note": "Alternative supporting location; same field scope."
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "modeled_loan_amount": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "modeled_down_payment": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "modeled_interest_rate": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "modeled_loan_term_years": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "levered_irr": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "unlevered_irr": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5,
+          "note": ""
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "parking_spaces": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 8,
+          "note": ""
+        }
+      ],
+      "review_note": ""
+    },
+    "lp_preferred_return": {
+      "locations": [],
+      "review_note": "LP preferred return, not levered IRR. Not found in this OM."
+    },
+    "lp_minimum_subscription": {
+      "locations": [],
+      "review_note": "LP subscription minimum, not acquisition down payment. Not found in this OM."
+    }
+  },
+  "townhomes": {
+    "units": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N8",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "monthly_market_rent": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N9",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "rent_growth": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N10",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "vacancy_credit_loss": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N11",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "ltv": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N15",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "unit_cost": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N16",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "loan_amount": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N17",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "interest_rate": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N19",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "year2026_noi": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "F17",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "year2026_free_cashflow": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "F20",
+          "note": ""
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "property_address": {
+      "locations": [],
+      "review_note": "No subject property address supplied in this workbook."
+    },
+    "sponsor_legal_name": {
+      "locations": [],
+      "review_note": "No sponsor legal entity supplied in this workbook."
+    }
+  }
+}

@@ -105,8 +105,8 @@ def test_tool_schema_requires_every_field_and_hides_reviewer_fields():
     assert set(schema["required"]) == set(schema["properties"])
     assert set(VALUE_FIELDS) <= set(schema["properties"])
     assert not NON_EXTRACTABLE_FIELDS & set(schema["properties"])
-    for definition in schema["$defs"].values():
-        assert definition["additionalProperties"] is False
+    for name in ("evidence", "field_flags"):
+        assert schema["properties"][name]["items"]["additionalProperties"] is False
 
 
 def test_every_deal_field_is_extracted_and_checked():
@@ -116,7 +116,7 @@ def test_every_deal_field_is_extracted_and_checked():
 
 def test_the_model_cannot_set_how_its_evidence_was_verified():
     # `verification` is set by the checker, never taken from the model.
-    evidence_schema = _build_tool_schema()["input_schema"]["$defs"]["ExtractedEvidence"]
+    evidence_schema = _build_tool_schema()["input_schema"]["properties"]["evidence"]["items"]
 
     assert "verification" not in evidence_schema["properties"]
 
@@ -1043,7 +1043,7 @@ def test_a_provider_outage_during_feedback_is_a_controlled_error():
 
 def test_the_feedback_tool_schema_only_offers_deal_value_fields():
     schema = repe_extractor._build_feedback_tool_schema()["input_schema"]
-    corrections = schema["$defs"]["ReviewerCorrections"]
+    corrections = schema["properties"]["corrections"]
 
     assert set(corrections["properties"]) == set(VALUE_FIELDS)
     assert corrections["additionalProperties"] is False

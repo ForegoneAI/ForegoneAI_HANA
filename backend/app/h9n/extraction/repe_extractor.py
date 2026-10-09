@@ -61,6 +61,7 @@ from backend.app.h9n.extraction.extraction_output import (
 )
 from backend.app.h9n.schemas.base_deal import FieldEvidence, WithheldValue
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
+from backend.app.h9n.extraction.telemetry import record_model_response
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +69,16 @@ logger = logging.getLogger(__name__)
 # so DEFAULT_MODEL below - read once here - can come from .env too.
 load_dotenv(override=False)
 
-# The model used for structured extraction. Override with the
-# H9N_EXTRACTION_MODEL env var without touching code. Check
-# https://docs.claude.com for the current list of available model IDs. Any
-# model change is an LLM behavior change: re-run the held-out evaluation.
-DEFAULT_MODEL = os.environ.get("H9N_EXTRACTION_MODEL", "claude-sonnet-4-5-20250929")
+# OpenRouter uses author/model IDs even when the underlying model is Claude.
+# Explicit provider selection keeps extraction credentials separate from RAG.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api"
+DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4.5"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
+DEFAULT_MODEL = os.environ.get("H9N_EXTRACTION_MODEL") or (
+    DEFAULT_OPENROUTER_MODEL
+    if os.environ.get("H9N_EXTRACTION_PROVIDER", "anthropic").strip().lower() == "openrouter"
+    else DEFAULT_ANTHROPIC_MODEL
+)
 
 # Every field now carries a citation, so the tool call is several times larger
 # than the bare profile. Output tokens are only billed when generated, so a
@@ -219,8 +225,39 @@ never leave a genuine doubt unflagged.
 _Output = TypeVar("_Output", bound=BaseModel)
 
 
+def _inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Expand local Pydantic definitions without weakening their constraints.
+
+    Some provider translations lose `$ref` array-item schemas and treat nested
+    evidence/flags as strings. Explicit object schemas work across those routes.
+    This changes the schema sent to the model; local Pydantic validation and
+    citation integrity checks remain authoritative. Never decode/coerce a bad
+    model response to make it pass validation.
+    """
+    definitions = schema.get("$defs", {})
+
+    def expand(node: Any, active: tuple[str, ...] = ()) -> Any:
+        if isinstance(node, list):
+            return [expand(item, active) for item in node]
+        if not isinstance(node, dict):
+            return node
+        if "$ref" in node:
+            ref = node["$ref"]
+            if not isinstance(ref, str) or not ref.startswith("#/$defs/") or ref in active:
+                raise ExtractionConfigurationError("The extraction tool schema has an unsupported reference.")
+            name = ref.removeprefix("#/$defs/")
+            if name not in definitions:
+                raise ExtractionConfigurationError("The extraction tool schema has an unresolved reference.")
+            resolved = expand(definitions[name], (*active, ref))
+            siblings = expand({key: value for key, value in node.items() if key != "$ref"}, active)
+            return {**resolved, **siblings}
+        return {key: expand(value, active) for key, value in node.items() if key != "$defs"}
+
+    return expand(schema)
+
+
 def _tool_definition(name: str, description: str, output_model: type[BaseModel]) -> dict[str, Any]:
-    schema = output_model.model_json_schema()
+    schema = _inline_schema_refs(output_model.model_json_schema())
     schema.pop("title", None)
     return {"name": name, "description": description, "input_schema": schema}
 
@@ -237,7 +274,8 @@ def _build_tool_schema() -> dict[str, Any]:
         "non-null value needs a matching `evidence` entry quoting the "
         "page it came from, and any value that isn't fully trustworthy "
         "(ambiguous, approximate, or contradicted elsewhere) needs a "
-        "`field_flags` entry.",
+        "`field_flags` entry. Evidence and field_flags are arrays of JSON "
+        "objects, never strings containing serialized objects.",
         REPEExtractionOutput,
     )
 
@@ -325,7 +363,25 @@ def _prepare_pages(pages: list[dict[str, Any]], *, caller: str = "extract_repe_d
     return usable
 
 
-def _build_client() -> anthropic.Anthropic:
+def _build_client(provider: str | None = None) -> anthropic.Anthropic:
+    provider = (provider or os.environ.get("H9N_EXTRACTION_PROVIDER", "anthropic")).strip().lower()
+    if provider not in ("anthropic", "openrouter"):
+        raise ExtractionConfigurationError("H9N_EXTRACTION_PROVIDER must be anthropic or openrouter.")
+    if provider == "openrouter":
+        key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        if not key:
+            raise ExtractionConfigurationError("Set OPENROUTER_API_KEY for OpenRouter extraction.")
+        # OpenRouter accepts native Messages requests at /api/v1/messages.
+        # Bearer auth and an explicitly empty api_key prevent an unrelated
+        # ANTHROPIC_API_KEY from being sent to OpenRouter. The same SDK/tool
+        # shape preserves schema repair, evidence checks, usage, and deadlines.
+        return anthropic.Anthropic(
+            base_url=OPENROUTER_BASE_URL,
+            api_key="",
+            auth_token=key,
+            max_retries=0,
+            default_headers={"X-Api-Key": anthropic.omit},
+        )
     try:
         # Retries are done by _send() within the time budget, not by the SDK.
         client = anthropic.Anthropic(max_retries=0)
@@ -340,11 +396,11 @@ def _build_client() -> anthropic.Anthropic:
     return client
 
 
-def _prepare_client(client: Optional[anthropic.Anthropic]) -> anthropic.Anthropic:
+def _prepare_client(client: Optional[anthropic.Anthropic], provider: str | None = None) -> anthropic.Anthropic:
     """The client to send with. A caller's own client keeps its settings but
     has its SDK retries switched off, so _send() is the only retry loop."""
     if client is None:
-        return _build_client()
+        return _build_client(provider)
     return client.with_options(max_retries=0)
 
 
@@ -385,6 +441,10 @@ def _send(llm_client: anthropic.Anthropic, *, deadline: float, max_retries: int,
     """One request, retried with backoff for transient provider failures
     while the time budget lasts. Each attempt may use only the time left, so
     the whole extraction ends by `deadline`."""
+    if str(getattr(llm_client, "base_url", "")).rstrip("/") == OPENROUTER_BASE_URL:
+        # Route only to endpoints supporting the forced tool-call parameters.
+        # Local Pydantic validation remains mandatory for every returned call.
+        request["extra_body"] = {"provider": {"require_parameters": True}}
     retry = 0
     while True:
         remaining = deadline - _monotonic()
@@ -427,6 +487,8 @@ def _summarize_validation_error(exc: ValidationError, *, limit: int = 25) -> str
     for error in exc.errors(include_input=False, include_url=False)[:limit]:
         location = ".".join(str(part) for part in error["loc"]) or "(root)"
         lines.append(f"- {location}: {error['msg']}")
+        if error["type"] == "model_type":
+            lines.append("  Supply a JSON object with the declared properties, not a string containing JSON.")
     remaining = exc.error_count() - limit
     if remaining > 0:
         lines.append(f"- ...and {remaining} more")
@@ -463,6 +525,9 @@ def _call_tool(
             messages=messages,
         )
         _log_attempt(tool_name, attempt, response)
+        # Record before validation/refusal checks: discarded responses and
+        # schema-repair attempts still consume billed tokens (M1.5).
+        record_model_response(response, model)
 
         if response.stop_reason == "refusal":
             raise ExtractionRefusedError("The model declined to process this document.")
@@ -513,6 +578,7 @@ def extract_repe_deal(
     *,
     client: Optional[anthropic.Anthropic] = None,
     model: str = DEFAULT_MODEL,
+    provider: str | None = None,
 ) -> REPEDealProfile:
     """Sends page-preserved deal package text to Claude and returns a
     REPEDealProfile whose value fields hold only verified values.
@@ -525,9 +591,11 @@ def extract_repe_deal(
     client:
         An existing `anthropic.Anthropic` client to reuse (its own SDK retries
         are switched off; H9N's retries apply). If not provided, one is built
-        from the environment (`ANTHROPIC_API_KEY`).
+        from the configured provider's environment credentials.
     model:
-        The Claude model id to use for extraction.
+        The provider's model ID, such as an OpenRouter author/model ID.
+    provider:
+        "anthropic" or "openrouter"; defaults to H9N_EXTRACTION_PROVIDER.
 
     Returns
     -------
@@ -565,7 +633,7 @@ def extract_repe_deal(
         )
 
     output = _call_tool(
-        _prepare_client(client),
+        _prepare_client(client, provider),
         model=model,
         system=SYSTEM_PROMPT,
         tool=_build_tool_schema(),
@@ -649,6 +717,7 @@ def apply_reviewer_feedback(
     *,
     client: Optional[anthropic.Anthropic] = None,
     model: str = DEFAULT_MODEL,
+    provider: str | None = None,
 ) -> dict[str, Any]:
     """Given the original document pages, the current (reviewer-flagged)
     deal profile, and the reviewer's own explanation of what's wrong, asks
@@ -700,7 +769,7 @@ def apply_reviewer_feedback(
         )
 
     output = _call_tool(
-        _prepare_client(client),
+        _prepare_client(client, provider),
         model=model,
         system=FEEDBACK_SYSTEM_PROMPT,
         tool=_build_feedback_tool_schema(),
