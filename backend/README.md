@@ -396,6 +396,63 @@ The response then also includes an `extraction_run_id`. A few things to know:
   `20260929_create_h9n_extraction_runs.sql`, and set the Supabase variables in `.env` (see
   [RAG.md](./RAG.md)). The migration's comments describe each table and column.
 
+### Investment mandates (Milestone 3.1)
+
+A **mandate** is a fund's explicit screening criteria, saved per organization in Supabase so a
+deal can later be screened against it (M3.2). It's a small editable form, defined in
+`app/h9n/screening/mandate.py`:
+
+| Section | Example | Checked against (Deal Profile field) |
+|---|---|---|
+| `asset_types` | `["Multifamily"]` | `property_type` |
+| `target_markets` / `excluded_markets` | `["Austin", "Phoenix"]` | `market` |
+| `deal_size` | `{"min": 5000000, "max": 50000000}` | `asking_price` |
+| `key_metrics` | `{"cap_rate": {"min": 5.5}}` | the field of the same name |
+| `leverage` | `{"max_ltv": 65}` | `ltv`, `interest_rate` |
+| `preferences` | `["Value-add business plan"]` | nothing - soft, shown to reviewers only |
+
+Units match the Deal Profile: dollars, and percentages as numbers (6.5 means 6.5%). Empty sections
+mean "no requirement", but a mandate needs at least one hard criterion. Invalid mandates (min above
+max, a 550% cap rate, a market both targeted and excluded) are rejected with a 422 and never saved.
+
+Routes (internal API key and `?organization_id=` required, like run recording above):
+
+```bash
+# Create
+curl -X POST "http://localhost:8000/api/h9n/mandates?organization_id=$ORG" \
+  -H "X-H9N-API-Key: $H9N_RAG_INTERNAL_API_KEY" -H "Content-Type: application/json" \
+  -d '{"name": "Core Office", "criteria": {"asset_types": ["Office"], "leverage": {"max_ltv": 60}}}'
+
+# List active mandates (add &include_archived=true for all), fetch, edit, archive
+GET  /api/h9n/mandates?organization_id=...
+GET  /api/h9n/mandates/{id}?organization_id=...
+PUT  /api/h9n/mandates/{id}?organization_id=...          # the fetched mandate, edited (keeps its "version")
+POST /api/h9n/mandates/{id}/archive?organization_id=...
+
+# Select one for screening (409 if archived)
+GET  /api/h9n/mandates/{id}/for-screening?organization_id=...
+```
+
+Things that aren't obvious:
+
+- **Edits name the version they started from.** Every edit bumps `version` (archiving doesn't);
+  an edit based on an older version gets a 409 instead of silently overwriting someone else's
+  change. PUT replaces the whole mandate, so send everything back, not just the changed part.
+  Screening results should store the mandate `version` they used.
+- **Archive, don't delete.** Archived mandates disappear from the list and can't be edited or
+  selected, but stay in the database so old screenings still show their criteria. Active names
+  must be unique per organization (ignoring case).
+- **Category wording isn't normalized yet.** `asset_types` and markets are plain text; M3.2 has to
+  decide how "Multifamily" matches an extracted "Apartment" until shared vocabularies exist.
+- **Demo mandate:** `python -m backend.scripts.create_demo_mandate --organization-id <uuid>` saves
+  "Demo - Sun Belt Value-Add Multifamily" (marked `is_demo`, safe to run twice).
+- **Setup:** apply `supabase/migrations/20261013_create_h9n_investment_mandates.sql` after the two
+  migrations above.
+- **Known gap - roles:** any member of an organization can create, edit and archive its mandates,
+  including `viewer`s. Restricting edits to admins needs the member's role from sign-in (M2.5).
+- **Sign-in:** access is checked in one place (`_organization_for_request` in
+  `app/h9n/screening/api.py`); swap it for the signed-in user once M2.5 lands.
+
 ## Settings
 
 | Env var | Required? | Default | What it's for |
