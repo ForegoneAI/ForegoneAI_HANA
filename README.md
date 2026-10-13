@@ -25,3 +25,13 @@ Activate the virtual environment:
 
 ```bash
 source projectvenv/bin/activate
+```
+
+## Website
+
+foregone.ai is built from `web/` — a Next.js static export. Pushing to `master`
+builds it and deploys it to GitHub Pages; there is no manual publish step. See
+`web/README.md`.
+
+`site/` is the hand-written HTML the React version was ported from. It is no
+longer published and is kept for reference only.

@@ -1,5 +1,12 @@
 # ForegoneAI — HANA
 
+> **Not published any more.** foregone.ai is built from `../web` (Next.js) as
+> of the React port. This folder is kept as the reference for what that port was
+> built from — the CSS, the motion layer and the markup all came from here — but
+> nothing deploys it. Edits here do not reach the live site.
+>
+> Everything below describes the folder as it was when it was live.
+
 Static site. No build step, no package manager, no framework — plain HTML, CSS
 and one JS file, plus a bundled Three.js. What you edit is what ships.
 
@@ -15,10 +22,11 @@ Serve over HTTP; opening `index.html` from the filesystem breaks fonts and links
 
 Live at **foregone.ai** from **ForegoneAI/ForegoneAI_HANA**, branch `master`.
 
-`.github/workflows/static.yml` (repo root, one level up) publishes `./site`
-verbatim to GitHub Pages on every push. The empty `.nojekyll` is what stops
-Pages hiding `assets/`. Custom domain is set under **Settings → Pages**; DNS for
-`foregone.ai` and `www` points at `foregoneai.github.io`.
+`.github/workflows/static.yml` used to publish `./site` verbatim to GitHub
+Pages on every push. It now builds `../web` and publishes `web/out` instead, so
+this folder is no longer deployed. Custom domain is still set under
+**Settings → Pages**; DNS for `foregone.ai` and `www` points at
+`foregoneai.github.io`.
 
 No local git clone — this folder is uploaded through the GitHub web UI. Making
 it a real clone would turn deploys into one command.
