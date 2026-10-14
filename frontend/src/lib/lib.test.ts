@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { errorMessageFrom } from "./api";
+import { dealTitle, formatSavedAt, reviewStatusBadge } from "./deals";
 import { safeNextPath } from "./navigation";
 import { MAX_UPLOAD_BYTES, formatBytes, validatePdf } from "./upload";
 
@@ -63,9 +64,31 @@ describe("safeNextPath", () => {
   });
 
   it.each([null, "", "https://evil.example", "//evil.example", "/\\evil.example", "deals"])(
-    "replaces %j with the upload page",
+    "replaces %j with the deal list",
     (next) => {
-      expect(safeNextPath(next)).toBe("/deals/new");
+      expect(safeNextPath(next)).toBe("/deals");
     },
   );
+});
+
+describe("reviewStatusBadge", () => {
+  it("labels each review status for people", () => {
+    expect(reviewStatusBadge("pending")).toEqual({ label: "Needs review", tone: "warn" });
+    expect(reviewStatusBadge("approved")).toEqual({ label: "Approved", tone: "ok" });
+    expect(reviewStatusBadge("rejected")).toEqual({ label: "Rejected", tone: "error" });
+  });
+});
+
+describe("dealTitle", () => {
+  it("prefers the deal name, then the property name", () => {
+    expect(dealTitle({ deal_name: "Fund IV · Elm", property_name: "Elm Court" })).toBe("Fund IV · Elm");
+    expect(dealTitle({ deal_name: null, property_name: "Elm Court" })).toBe("Elm Court");
+    expect(dealTitle({ deal_name: null, property_name: null })).toBe("Untitled deal");
+  });
+});
+
+describe("formatSavedAt", () => {
+  it("shows the date and time the deal was saved", () => {
+    expect(formatSavedAt("2026-10-14T12:00:00Z", "en-US")).toMatch(/Oct 14, 2026/);
+  });
 });

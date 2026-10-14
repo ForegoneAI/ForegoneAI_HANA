@@ -9,6 +9,7 @@ This is separate from `site/`, the public marketing site, which is plain HTML pu
 | Path | What it does |
 |---|---|
 | `/login` | Email and password sign-in through Supabase Auth |
+| `/deals` | Every deal your organization has saved, newest first, to reopen one. `/` redirects here |
 | `/deals/new` | Upload a PDF and follow it through uploading → extracting → ready (M2.1) |
 | `/deals/[id]` | The deal workspace. Shows the key extracted values for now; the review form (M2.2) replaces it |
 
@@ -56,7 +57,8 @@ GitHub runs all three on every pull request that touches `frontend/` (`.github/w
 ## Code layout
 
 - `src/app/`: pages (one folder per route)
-- `src/components/`: `RequireSignIn` (the sign-in gate) and `AppHeader`
+- `src/components/`: `RequireSignIn` (the sign-in gate), `AppHeader`, and the shared building blocks later pages reuse: `Button`/`ButtonLink`, `Notice` (errors are announced to screen readers), `Badge` (review status, field flags). Colours and spacing live once, as tokens at the top of `src/app/globals.css`
 - `src/lib/api.ts`: calls to the H9N API, adding the session token and turning API errors into plain messages
 - `src/lib/supabase.ts`: the browser Supabase client
 - `src/lib/upload.ts`: checks a chosen file before uploading (PDF, 50 MB limit)
+- `src/lib/deals.ts`: how a deal's title, review status and save time read in the app

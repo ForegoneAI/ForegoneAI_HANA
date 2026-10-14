@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Badge } from "@/components/Badge";
+import { Notice } from "@/components/Notice";
 import { RequireSignIn } from "@/components/RequireSignIn";
 import { ApiError, getDeal, type DealProfile } from "@/lib/api";
+import { dealTitle, reviewStatusBadge } from "@/lib/deals";
 
 const KEY_FIELDS: { field: keyof DealProfile; label: string; format?: (value: number) => string }[] = [
   { field: "property_name", label: "Property" },
@@ -42,11 +45,9 @@ function DealWorkspace() {
   if (error) {
     return (
       <main className="page">
-        <p className="notice notice--error" role="alert">
-          {error}
-        </p>
+        <Notice tone="error">{error}</Notice>
         <p>
-          <Link href="/deals/new">Upload a deal</Link>
+          <Link href="/deals">Back to all deals</Link>
         </p>
       </main>
     );
@@ -66,12 +67,17 @@ function DealWorkspace() {
     { label: "withheld", count: deal.withheld_values.length },
   ];
 
+  const status = reviewStatusBadge(deal.review_status);
+
   return (
     <main className="page">
-      <p className="muted mono" style={{ margin: 0 }}>
-        Review status: {deal.review_status}
+      <p className="breadcrumb">
+        <Link href="/deals">← All deals</Link>
       </p>
-      <h1>{deal.deal_name ?? "Untitled deal"}</h1>
+      <div className="page-head">
+        <h1>{dealTitle(deal)}</h1>
+        <Badge tone={status.tone}>{status.label}</Badge>
+      </div>
 
       <dl className="facts">
         {KEY_FIELDS.map(({ field, label, format }) => {
@@ -94,16 +100,16 @@ function DealWorkspace() {
       <h2>Needs attention</h2>
       <div className="flags">
         {flags.map(({ label, count }) => (
-          <span key={label} className={`flag${count > 0 ? " flag--warn" : ""}`}>
+          <Badge key={label} tone={count > 0 ? "warn" : "neutral"}>
             {count} {label}
-          </span>
+          </Badge>
         ))}
       </div>
 
-      <p className="notice">
+      <Notice>
         The full review form, with editing and source evidence for each field, is coming next. For now
         this page confirms the deal was extracted and saved.
-      </p>
+      </Notice>
     </main>
   );
 }

@@ -65,6 +65,37 @@ code,
   padding: 40px var(--gutter) 80px;
 }
 
+/* A page's title with its main action or status beside it. */
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.page-head h1 {
+  margin: 0;
+}
+
+.breadcrumb {
+  margin: 0 0 12px;
+  font-size: 0.88rem;
+}
+
+.breadcrumb a {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
 .page--narrow {
   max-width: 420px;
   padding-top: 12vh;
@@ -94,6 +125,16 @@ code,
   gap: 16px;
   flex-wrap: wrap;
   font-size: 0.92rem;
+}
+
+.app-header__nav a {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.app-header__nav a:hover,
+.app-header__nav a[aria-current="page"] {
+  color: var(--ink);
 }
 
 .app-header__email {
@@ -330,15 +371,69 @@ a:focus-visible,
   margin: 8px 0 0;
 }
 
-.flag {
+/* Badges: review status, field flags */
+.badge {
+  display: inline-block;
   font-size: 0.82rem;
-  padding: 4px 10px;
+  line-height: 1.4;
+  padding: 3px 10px;
   border-radius: 999px;
   border: 1px solid var(--line);
   color: var(--ink-2);
+  white-space: nowrap;
 }
 
-.flag--warn {
+.badge--ok {
+  color: var(--ok);
+  border-color: rgba(143, 212, 164, 0.4);
+}
+
+.badge--warn {
   color: var(--warn);
   border-color: rgba(232, 195, 122, 0.4);
+}
+
+.badge--error {
+  color: var(--error);
+  border-color: rgba(240, 154, 154, 0.4);
+}
+
+/* Deal list */
+.deal-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.deal-list__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-1);
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.deal-list__item:hover {
+  border-color: var(--ink-3);
+  background: var(--bg-raise);
+}
+
+.deal-list__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.deal-list__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
 }

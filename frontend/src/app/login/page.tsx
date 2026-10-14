@@ -3,6 +3,8 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 
+import { Button } from "@/components/Button";
+import { Notice } from "@/components/Notice";
 import { safeNextPath } from "@/lib/navigation";
 import { getSupabase } from "@/lib/supabase";
 
@@ -60,14 +62,10 @@ function LoginForm() {
           onChange={(event) => setPassword(event.target.value)}
         />
       </div>
-      <button type="submit" className="btn btn--block" disabled={submitting}>
+      <Button type="submit" block disabled={submitting}>
         {submitting ? "Signing in…" : "Sign in"}
-      </button>
-      {error && (
-        <p className="notice notice--error" role="alert">
-          {error}
-        </p>
-      )}
+      </Button>
+      {error && <Notice tone="error">{error}</Notice>}
     </form>
   );
 }

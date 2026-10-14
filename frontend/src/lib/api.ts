@@ -11,6 +11,8 @@ export class ApiError extends Error {
   }
 }
 
+export type ReviewStatus = "pending" | "approved" | "rejected";
+
 /** The fields the app currently shows from a REPEDealProfile. */
 export interface DealProfile {
   deal_name: string | null;
@@ -24,8 +26,17 @@ export interface DealProfile {
   conflicting_information: string[];
   uncertain_information: string[];
   withheld_values: { field_name: string }[];
-  review_status: "pending" | "approved" | "rejected";
+  review_status: ReviewStatus;
   [field: string]: unknown;
+}
+
+/** One row of GET /api/h9n/repe/deals. */
+export interface DealSummary {
+  deal_id: string;
+  deal_name: string | null;
+  property_name: string | null;
+  review_status: ReviewStatus;
+  saved_at: string;
 }
 
 export interface ExtractResponse {
@@ -117,18 +128,26 @@ export async function uploadDeal(
   });
 }
 
-/** Fetches a saved deal from GET /api/h9n/repe/deals/{id}. */
-export async function getDeal(dealId: string): Promise<DealProfile> {
+/** GETs an H9N API path as the signed-in user, turning failures into ApiErrors. */
+async function getJson<T>(path: string): Promise<T> {
   const token = await accessToken();
   let response: Response;
   try {
-    response = await fetch(apiUrl(`/api/h9n/repe/deals/${encodeURIComponent(dealId)}`), {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    response = await fetch(apiUrl(path), { headers: { Authorization: `Bearer ${token}` } });
   } catch {
     throw new ApiError(0, "Couldn't reach the H9N service. Check your connection and try again.");
   }
   const body = parseJson(await response.text());
   if (!response.ok) throw new ApiError(response.status, errorMessageFrom(response.status, body));
-  return body as DealProfile;
+  return body as T;
+}
+
+/** Lists the deals the user's organizations own, most recently saved first. */
+export function listDeals(): Promise<DealSummary[]> {
+  return getJson<DealSummary[]>("/api/h9n/repe/deals");
+}
+
+/** Fetches a saved deal from GET /api/h9n/repe/deals/{id}. */
+export function getDeal(dealId: string): Promise<DealProfile> {
+  return getJson<DealProfile>(`/api/h9n/repe/deals/${encodeURIComponent(dealId)}`);
 }

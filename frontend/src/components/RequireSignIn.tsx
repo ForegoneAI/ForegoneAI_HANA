@@ -6,6 +6,7 @@ import { Suspense, useEffect, useState, type ReactNode } from "react";
 
 import { getSupabase, supabaseConfigError } from "@/lib/supabase";
 import { AppHeader } from "./AppHeader";
+import { Notice } from "./Notice";
 
 function Checking() {
   return (
@@ -52,7 +53,7 @@ function SignInGate({ children }: { children: ReactNode }) {
   if (configError) {
     return (
       <main className="page">
-        <p className="notice notice--error">{configError}</p>
+        <Notice tone="error">{configError}</Notice>
       </main>
     );
   }

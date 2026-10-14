@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ChangeEvent, type DragEvent } from "react";
 
+import { Button, ButtonLink } from "@/components/Button";
+import { Notice } from "@/components/Notice";
 import { RequireSignIn } from "@/components/RequireSignIn";
 import { ApiError, uploadDeal, type ExtractResponse } from "@/lib/api";
 import { formatBytes, validatePdf } from "@/lib/upload";
@@ -104,18 +105,14 @@ function UploadDeal() {
             {file.name} <span className="muted">· {formatBytes(file.size)}</span>
           </span>
           {stage.name !== "done" && (
-            <button type="button" className="btn" onClick={start} disabled={busy || Boolean(fileError)}>
+            <Button onClick={start} disabled={busy || Boolean(fileError)}>
               {stage.name === "failed" ? "Try again" : "Extract deal"}
-            </button>
+            </Button>
           )}
         </div>
       )}
 
-      {fileError && (
-        <p className="notice notice--error" role="alert">
-          {fileError}
-        </p>
-      )}
+      {fileError && <Notice tone="error">{fileError}</Notice>}
 
       {stage.name !== "idle" && stage.name !== "failed" && (
         <section aria-live="polite">
@@ -145,33 +142,29 @@ function UploadDeal() {
         </section>
       )}
 
-      {stage.name === "failed" && (
-        <p className="notice notice--error" role="alert">
-          {stage.message}
-        </p>
-      )}
+      {stage.name === "failed" && <Notice tone="error">{stage.message}</Notice>}
 
       {stage.name === "done" && (
-        <div className="notice notice--ok">
+        <Notice tone="ok">
           <p style={{ margin: 0 }}>
             <strong>{stage.result.profile.deal_name ?? "Your deal"}</strong> is ready for review.
           </p>
-          <p style={{ margin: "12px 0 0", display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <Link className="btn btn--sm" href={`/deals/${stage.result.deal_id}`}>
+          <div className="actions">
+            <ButtonLink size="sm" href={`/deals/${stage.result.deal_id}`}>
               Open deal workspace
-            </Link>
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
+            </ButtonLink>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setFile(null);
                 setStage({ name: "idle" });
               }}
             >
               Upload another
-            </button>
-          </p>
-        </div>
+            </Button>
+          </div>
+        </Notice>
       )}
     </main>
   );

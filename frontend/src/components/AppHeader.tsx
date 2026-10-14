@@ -1,12 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { getSupabase } from "@/lib/supabase";
+import { Button } from "./Button";
+
+const NAV = [
+  { href: "/deals", label: "Deals" },
+  { href: "/deals/new", label: "Upload a deal" },
+];
 
 export function AppHeader({ email }: { email: string }) {
   const router = useRouter();
+  const pathname = usePathname();
 
   async function signOut() {
     await getSupabase().auth.signOut();
@@ -15,15 +22,19 @@ export function AppHeader({ email }: { email: string }) {
 
   return (
     <header className="app-header">
-      <Link href="/deals/new" className="app-header__brand">
+      <Link href="/deals" className="app-header__brand">
         HANA <span className="muted">· H9N</span>
       </Link>
       <nav className="app-header__nav">
-        <Link href="/deals/new">Upload a deal</Link>
+        {NAV.map(({ href, label }) => (
+          <Link key={href} href={href} aria-current={pathname === href ? "page" : undefined}>
+            {label}
+          </Link>
+        ))}
         <span className="muted app-header__email">{email}</span>
-        <button type="button" className="btn btn--ghost btn--sm" onClick={signOut}>
+        <Button variant="ghost" size="sm" onClick={signOut}>
           Sign out
-        </button>
+        </Button>
       </nav>
     </header>
   );
