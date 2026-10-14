@@ -9,16 +9,14 @@
     GET  /api/h9n/mandates/{id}/for-screening   select one for a screening
     GET  /api/h9n/mandates/vocabulary           the allowed property types and markets
 
-Every route except /vocabulary acts for one organization, given as
-`?organization_id=...`. The list returns {"mandates": [...], "skipped": n},
+Every route except /vocabulary acts for one organization: `?organization_id=...`,
+which may be left out when the caller belongs to only one. The list returns {"mandates": [...], "skipped": n},
 where `skipped` counts saved mandates that couldn't be read, so a UI can say
 so (in the body, not a header, so browsers on another domain can see it).
 
-Access: until customer sign-in lands (M2.5, PR #6), every route - including
-/vocabulary, for consistency - needs the same internal operator key as the
-RAG and run-recording routes (X-H9N-API-Key). That check lives only in
-`_caller_has_access` below, so switching to signed-in users is a
-one-function change.
+Access (M2.5): every route - including /vocabulary, for consistency - needs a
+signed-in user (`Authorization: Bearer <token>`), and acts only for an
+organization that user is an active member of, like the deal and RAG routes.
 """
 
 from __future__ import annotations
@@ -28,10 +26,10 @@ from functools import lru_cache
 from typing import Callable, TypeVar
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
-from backend.app.h9n.rag.api import require_internal_rag_access
+from backend.app.h9n.auth import AuthenticatedUser, get_current_user, resolve_organization
 from backend.app.h9n.rag.config import RagConfigurationError, get_rag_settings
 from backend.app.h9n.screening.mandate import Mandate, MandateInput, MandateUpdate
 from backend.app.h9n.screening.vocabulary import ASSET_TYPES, MARKETS
@@ -60,19 +58,15 @@ def get_mandate_repository() -> MandateRepository:
     return SupabaseMandateRepository(get_rag_settings())
 
 
-def _caller_has_access(
-    x_h9n_api_key: str | None = Header(default=None, alias="X-H9N-API-Key"),
-) -> None:
-    """The only place access is checked."""
-    require_internal_rag_access(x_h9n_api_key)
-
-
 def _organization_for_request(
-    organization_id: UUID = Query(..., description="The organization whose mandates to use."),
-    _: None = Depends(_caller_has_access),
+    organization_id: UUID | None = Query(
+        None, description="The organization whose mandates to use. Only needed if you belong to several."
+    ),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> UUID:
-    """The organization a request acts for."""
-    return organization_id
+    """The organization a request acts for: one the signed-in user belongs to,
+    or a 403 (see resolve_organization)."""
+    return resolve_organization(user, organization_id)
 
 
 def _call(action: Callable[[MandateRepository], T]) -> T:
@@ -116,7 +110,7 @@ def list_mandates(
     return MandateList(mandates=mandates, skipped=skipped)
 
 
-@router.get("/vocabulary", dependencies=[Depends(_caller_has_access)])
+@router.get("/vocabulary", dependencies=[Depends(get_current_user)])
 def mandate_vocabulary() -> dict[str, list[str]]:
     """The property types and markets a mandate may use (for a UI's pickers).
     The same fixed lists for every organization, so no organization is needed.

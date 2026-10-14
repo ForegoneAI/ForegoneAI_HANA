@@ -474,12 +474,13 @@ is `Office`), and a bare "land" only counts when nothing else matches. To add a 
 removing a canonical name makes saved mandates that use it unreadable, so pair that with a
 `CRITERIA_SCHEMA_VERSION` bump and a migration.
 
-Routes (internal API key and `?organization_id=` required, like run recording above):
+Routes (signed in, like the deal routes above; `?organization_id=` is only needed if you belong to
+several organizations):
 
 ```bash
 # Create
-curl -X POST "http://localhost:8000/api/h9n/mandates?organization_id=$ORG" \
-  -H "X-H9N-API-Key: $H9N_RAG_INTERNAL_API_KEY" -H "Content-Type: application/json" \
+curl -X POST "http://localhost:8000/api/h9n/mandates" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name": "Core Office", "criteria": {"asset_types": ["Office"], "leverage": {"max_ltv": 60}}}'
 
 # List active mandates (add &include_archived=true for all) -> {"mandates": [...], "skipped": n}
