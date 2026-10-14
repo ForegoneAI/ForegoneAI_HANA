@@ -11,7 +11,7 @@ This is separate from `site/`, the public marketing site, which is plain HTML pu
 | `/login` | Email and password sign-in through Supabase Auth |
 | `/deals` | Every deal your organization has saved, newest first, to reopen one. `/` redirects here |
 | `/deals/new` | Upload a PDF and follow it through uploading → extracting → ready (M2.1). A member of several organizations first chooses which one the deal is for (M2.5) |
-| `/deals/[id]` | The deal workspace. Shows the key extracted values for now; the review form (M2.2) replaces it |
+| `/deals/[id]` | The deal workspace (M2.2): the Deal Profile as an editable form grouped by property, transaction, operations, financing, sponsor and assumptions. Each field is marked cited, missing, uncertain, conflicting, unverified (a proposed value to accept or dismiss) or corrected. Save, mark reviewed, approve, reopen or reject with feedback (M2.4), and see the deal's history |
 
 Pages other than `/login` send visitors who aren't signed in to `/login`, then back. That redirect is for convenience. The real protection is the API itself, which rejects any request without a valid session token (M2.5).
 
@@ -48,7 +48,7 @@ Pages other than `/login` send visitors who aren't signed in to `/login`, then b
 
 ```bash
 npm run lint   # ESLint
-npm test       # unit tests (Vitest)
+npm test       # unit and component tests (Vitest; component tests run in jsdom)
 npm run build  # production build, including the TypeScript check
 ```
 
@@ -62,4 +62,9 @@ GitHub runs all three on every pull request that touches `frontend/` (`.github/w
 - `src/lib/supabase.ts`: the browser Supabase client
 - `src/lib/upload.ts`: checks a chosen file before uploading (PDF, 50 MB limit)
 - `src/lib/organizations.ts`: which organization an upload is for, and whether the user must choose one
+- `src/components/review/`: the deal workspace's review form (`DealReviewForm`, one `FieldRow` per field), `ReviewActions` and `DealHistoryPanel`
+- `src/lib/dealFields.ts`: every Deal Profile field, its group and kind (money, percent, ...), and how typed values are read and shown
+- `src/lib/fieldStatus.ts`: how far each field can be trusted, worked out from the extractor's flag lists. When M1.2 adds a structured status per field, only this file needs to change
+- `src/lib/reviewForm.ts`: turns a reviewer's edits into the exact changes to save
+- `src/lib/history.ts`: a deal's history as a readable timeline
 - `src/lib/deals.ts`: how a deal's title, review status and save time read in the app
