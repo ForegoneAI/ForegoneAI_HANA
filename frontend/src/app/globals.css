@@ -161,7 +161,8 @@ code,
 }
 
 input[type="email"],
-input[type="password"] {
+input[type="password"],
+select {
   width: 100%;
   padding: 11px 13px;
   border-radius: 8px;
@@ -172,6 +173,7 @@ input[type="password"] {
 }
 
 input:focus-visible,
+select:focus-visible,
 button:focus-visible,
 a:focus-visible,
 .dropzone:focus-within {
@@ -273,6 +275,13 @@ a:focus-visible,
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-1);
+}
+
+.file-row__action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.88rem;
 }
 
 .file-row__name {

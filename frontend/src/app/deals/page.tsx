@@ -8,16 +8,25 @@ import { Badge } from "@/components/Badge";
 import { ButtonLink } from "@/components/Button";
 import { Notice } from "@/components/Notice";
 import { RequireSignIn } from "@/components/RequireSignIn";
-import { ApiError, listDeals, type DealSummary } from "@/lib/api";
+import { ApiError, getCurrentUser, listDeals, type DealSummary } from "@/lib/api";
 import { dealTitle, formatSavedAt, reviewStatusBadge } from "@/lib/deals";
+import { organizationNames } from "@/lib/organizations";
 
 /** Every deal the user's organizations own, so a saved deal can be reopened. */
 function DealList() {
   const router = useRouter();
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set only for a member of several organizations, to label each deal.
+  const [orgNames, setOrgNames] = useState<Map<string, string> | null>(null);
 
   useEffect(() => {
+    // Labels are a nicety: the list still shows if this fails.
+    getCurrentUser()
+      .then((user) => {
+        if (user.organizations.length > 1) setOrgNames(organizationNames(user.organizations));
+      })
+      .catch(() => {});
     listDeals()
       .then(setDeals)
       .catch((caught) => {
@@ -57,6 +66,7 @@ function DealList() {
                     {deal.deal_name && deal.property_name && <span className="muted"> · {deal.property_name}</span>}
                   </span>
                   <span className="deal-list__meta">
+                    {orgNames && <span className="muted">{orgNames.get(deal.organization_id)}</span>}
                     <Badge tone={status.tone}>{status.label}</Badge>
                     <span className="muted mono">{formatSavedAt(deal.saved_at)}</span>
                   </span>

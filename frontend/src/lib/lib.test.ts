@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { errorMessageFrom } from "./api";
 import { dealTitle, formatSavedAt, reviewStatusBadge } from "./deals";
 import { safeNextPath } from "./navigation";
+import { organizationNames, uploadTarget } from "./organizations";
 import { MAX_UPLOAD_BYTES, formatBytes, validatePdf } from "./upload";
 
 describe("validatePdf", () => {
@@ -90,5 +91,37 @@ describe("dealTitle", () => {
 describe("formatSavedAt", () => {
   it("shows the date and time the deal was saved", () => {
     expect(formatSavedAt("2026-10-14T12:00:00Z", "en-US")).toMatch(/Oct 14, 2026/);
+  });
+});
+
+describe("uploadTarget", () => {
+  const north = { id: "org-north", name: "Northwind Capital" };
+  const acme = { id: "org-acme", name: "Acme Partners" };
+
+  it("lets a member of one organization upload without choosing", () => {
+    expect(uploadTarget([north], null)).toEqual({ kind: "ready" });
+  });
+
+  it("asks a member of several organizations to choose one", () => {
+    expect(uploadTarget([north, acme], null)).toEqual({ kind: "choose" });
+    expect(uploadTarget([north, acme], "not-theirs")).toEqual({ kind: "choose" });
+  });
+
+  it("sends the chosen organization", () => {
+    expect(uploadTarget([north, acme], "org-acme")).toEqual({ kind: "ready", organizationId: "org-acme" });
+  });
+
+  it("stops a user with no organization", () => {
+    expect(uploadTarget([], null)).toEqual({ kind: "none" });
+  });
+
+  it("leaves it to the API when the organizations couldn't be loaded", () => {
+    expect(uploadTarget(null, null)).toEqual({ kind: "ready" });
+  });
+});
+
+describe("organizationNames", () => {
+  it("maps each organization id to its name", () => {
+    expect(organizationNames([{ id: "a", name: "Acme" }]).get("a")).toBe("Acme");
   });
 });

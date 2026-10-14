@@ -399,7 +399,11 @@ acts for one organization the user is an active member of:
 
 - **One organization:** it's used automatically.
 - **Several organizations:** send `organization_id` (as a form field on `/extract`, or in the JSON
-  body of the RAG routes). Asking for an organization you're not in gets a 403.
+  body of the RAG routes, or `?organization_id=` on the mandate routes). Asking for an organization
+  you're not in gets a 403.
+- **Which ones am I in?** `GET /api/h9n/me` returns your user id and your organizations by name
+  (`{"user_id": ..., "organizations": [{"id": ..., "name": ...}]}`). The web app uses it to ask
+  members of several organizations which one an upload is for.
 
 **Setting up a user (until there's a sign-up screen):**
 
