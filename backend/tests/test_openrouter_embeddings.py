@@ -12,7 +12,6 @@ def _settings() -> RagSettings:
         openrouter_api_key="test-openrouter-key",
         supabase_url="https://example.supabase.co",
         supabase_service_role_key="test-service-key",
-        internal_api_key="test-internal-key",
         embedding_model="openai/text-embedding-3-small",
         embedding_dimensions=3,
         openrouter_referer="http://localhost:8000",

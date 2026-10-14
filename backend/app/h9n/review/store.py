@@ -68,6 +68,24 @@ class DealStore:
     def _pages_path_for(self, deal_id: str) -> Path:
         return self.store_dir / f"{deal_id}.pages.json"
 
+    def _owner_path_for(self, deal_id: str) -> Path:
+        return self.store_dir / f"{deal_id}.owner.json"
+
+    def save_owner(self, deal_id: str, organization_id: uuid.UUID) -> None:
+        """Records which organization a deal belongs to (Milestone 2.5), so the
+        API can refuse it to members of any other organization. Kept beside
+        the deal rather than inside it, like save_pages(), so it never
+        round-trips through REPEDealProfile."""
+        self._owner_path_for(deal_id).write_text(json.dumps({"organization_id": str(organization_id)}))
+
+    def owner_of(self, deal_id: str) -> uuid.UUID | None:
+        """The organization a deal belongs to, or None if it was saved before
+        ownership was recorded (such deals are not served by the API)."""
+        path = self._owner_path_for(deal_id)
+        if not path.exists():
+            return None
+        return uuid.UUID(json.loads(path.read_text())["organization_id"])
+
     def save(self, deal: REPEDealProfile, deal_id: str | None = None) -> str:
         """Saves a deal profile, returning the id it was saved under (a new
         random one if deal_id isn't given, e.g. right after extraction)."""
@@ -83,7 +101,9 @@ class DealStore:
 
     def list_ids(self) -> list[str]:
         return sorted(
-            path.stem for path in self.store_dir.glob("*.json") if not path.name.endswith(".pages.json")
+            path.stem
+            for path in self.store_dir.glob("*.json")
+            if not path.name.endswith((".pages.json", ".owner.json"))
         )
 
     def save_pages(self, deal_id: str, pages: list[dict[str, Any]]) -> None:

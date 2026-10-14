@@ -15,6 +15,7 @@ from postgrest.exceptions import APIError
 from pydantic import ValidationError
 
 from backend.app import main
+from backend.app.h9n.auth import get_current_user
 from backend.app.h9n.rag import api as rag_api
 from backend.app.h9n.rag.config import RagSettings
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
@@ -35,17 +36,14 @@ from backend.app.h9n.screening.mandate_repository import (
     select_mandate_for_screening,
 )
 from backend.scripts.create_demo_mandate import create_demo_mandate
+from backend.tests.auth_fakes import OTHER_ORGANIZATION_ID, TEST_ORGANIZATION_ID
 from backend.tests.mandate_fakes import FakeSupabaseClient
-
-API_KEY = "test-internal-key"
-
 
 def _settings() -> RagSettings:
     return RagSettings(
         openrouter_api_key="test-openrouter-key",
         supabase_url="https://example.supabase.co",
         supabase_service_role_key="test-service-key",
-        internal_api_key=API_KEY,
         embedding_model="test-model",
         embedding_dimensions=3,
         openrouter_referer=None,
@@ -286,75 +284,87 @@ def _url(path="", organization_id=None):
     return f"/api/h9n/mandates{path}", {"organization_id": str(organization_id or ORG)}
 
 
-ORG = uuid4()
-HEADERS = {"X-H9N-API-Key": API_KEY}
+# The organization the signed-in test user belongs to (see conftest.py).
+ORG = TEST_ORGANIZATION_ID
 
 
 def test_api_create_list_get_edit_archive_and_select(api_client):
     url, params = _url()
-    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json"))
+    created = api_client.post(url, params=params, json=DEMO_MANDATE.model_dump(mode="json"))
     assert created.status_code == 201, created.text
     mandate = Mandate.model_validate(created.json())
 
-    listed = api_client.get(url, params=params, headers=HEADERS)
+    listed = api_client.get(url, params=params)
     assert [item["id"] for item in listed.json()["mandates"]] == [str(mandate.id)]
 
     one_url, _ = _url(f"/{mandate.id}")
-    assert api_client.get(one_url, params=params, headers=HEADERS).json()["name"] == DEMO_MANDATE.name
+    assert api_client.get(one_url, params=params).json()["name"] == DEMO_MANDATE.name
 
     edit = {**DEMO_MANDATE.model_dump(mode="json"), "description": "Edited.", "version": 1}
-    edited = api_client.put(one_url, params=params, headers=HEADERS, json=edit)
+    edited = api_client.put(one_url, params=params, json=edit)
     assert edited.status_code == 200 and edited.json()["version"] == 2
 
-    stale = api_client.put(one_url, params=params, headers=HEADERS, json=edit)
+    stale = api_client.put(one_url, params=params, json=edit)
     assert stale.status_code == 409
 
     select_url, _ = _url(f"/{mandate.id}/for-screening")
-    assert api_client.get(select_url, params=params, headers=HEADERS).status_code == 200
+    assert api_client.get(select_url, params=params).status_code == 200
 
     archive_url, _ = _url(f"/{mandate.id}/archive")
-    assert api_client.post(archive_url, params=params, headers=HEADERS).json()["is_archived"] is True
-    assert api_client.get(select_url, params=params, headers=HEADERS).status_code == 409
-    assert api_client.get(url, params=params, headers=HEADERS).json() == {"mandates": [], "skipped": 0}
+    assert api_client.post(archive_url, params=params).json()["is_archived"] is True
+    assert api_client.get(select_url, params=params).status_code == 409
+    assert api_client.get(url, params=params).json() == {"mandates": [], "skipped": 0}
 
 
 def test_api_rejects_an_invalid_mandate_with_422(api_client):
     url, params = _url()
-    response = api_client.post(url, params=params, headers=HEADERS, json={"name": "Empty", "criteria": {}})
+    response = api_client.post(url, params=params, json={"name": "Empty", "criteria": {}})
     assert response.status_code == 422
     assert api_client.fake.mandates.rows == []
 
 
 def test_api_returns_404_for_an_unknown_or_foreign_mandate(api_client):
-    url, params = _url()
-    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json"))
-    mandate_id = created.json()["id"]
+    theirs = _repository(api_client.fake).create(OTHER_ORGANIZATION_ID, DEMO_MANDATE)
 
-    other_url, other_params = _url(f"/{mandate_id}", organization_id=uuid4())
-    assert api_client.get(other_url, params=other_params, headers=HEADERS).status_code == 404
+    for mandate_id in (theirs.id, uuid4()):
+        url, params = _url(f"/{mandate_id}")
+        assert api_client.get(url, params=params).status_code == 404
+
+
+def test_api_refuses_an_organization_the_user_is_not_a_member_of(api_client):
+    _repository(api_client.fake).create(OTHER_ORGANIZATION_ID, DEMO_MANDATE)
+
+    url, params = _url(organization_id=OTHER_ORGANIZATION_ID)
+    response = api_client.get(url, params=params)
+
+    assert response.status_code == 403
+    assert "Demo" not in response.text
 
 
 def test_api_returns_409_for_a_duplicate_name(api_client):
     url, params = _url()
     body = DEMO_MANDATE.model_dump(mode="json")
-    assert api_client.post(url, params=params, headers=HEADERS, json=body).status_code == 201
-    assert api_client.post(url, params=params, headers=HEADERS, json=body).status_code == 409
+    assert api_client.post(url, params=params, json=body).status_code == 201
+    assert api_client.post(url, params=params, json=body).status_code == 409
 
 
-@pytest.mark.parametrize("headers, expected", [({}, 401), ({"X-H9N-API-Key": "wrong"}, 403)])
-def test_api_requires_the_internal_key(api_client, headers, expected):
+def test_api_requires_a_signed_in_user(api_client):
+    main.app.dependency_overrides.pop(get_current_user)
     url, params = _url()
-    assert api_client.get(url, params=params, headers=headers).status_code == expected
+    assert api_client.get(url, params=params).status_code == 401
 
 
-def test_api_requires_an_organization(api_client):
-    assert api_client.get("/api/h9n/mandates", headers=HEADERS).status_code == 422
+def test_api_uses_the_users_only_organization_when_none_is_given(api_client):
+    created = api_client.post("/api/h9n/mandates", json=DEMO_MANDATE.model_dump(mode="json"))
+
+    assert created.status_code == 201, created.text
+    assert created.json()["organization_id"] == str(ORG)
 
 
 def test_api_hides_database_errors(api_client):
     api_client.fake.mandates.fail_with = APIError({"code": "XX000", "message": "secret internal detail"})
     url, params = _url()
-    response = api_client.get(url, params=params, headers=HEADERS)
+    response = api_client.get(url, params=params)
     assert response.status_code == 502
     assert "secret" not in response.text
 
@@ -381,10 +391,10 @@ def test_noi_limits_may_be_negative():
 
 def test_a_fetched_mandate_can_be_edited_and_sent_straight_back(api_client):
     url, params = _url()
-    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+    created = api_client.post(url, params=params, json=DEMO_MANDATE.model_dump(mode="json")).json()
 
     created["description"] = "Edited after fetching."
-    response = api_client.put(f"{url}/{created['id']}", params=params, headers=HEADERS, json=created)
+    response = api_client.put(f"{url}/{created['id']}", params=params, json=created)
 
     assert response.status_code == 200, response.text
     assert response.json()["version"] == 2
@@ -417,7 +427,7 @@ def test_the_demo_script_reports_a_race_instead_of_crashing():
 def test_saving_for_an_organization_that_does_not_exist_is_a_clear_error(api_client):
     api_client.fake.mandates.fail_with = APIError({"code": "23503", "message": "violates foreign key"})
     url, params = _url()
-    response = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json"))
+    response = api_client.post(url, params=params, json=DEMO_MANDATE.model_dump(mode="json"))
     assert response.status_code == 422
     assert "organization" in response.json()["detail"]
 
@@ -509,7 +519,7 @@ def test_the_demo_mandate_only_uses_canonical_values():
 
 
 def test_the_vocabulary_route_lists_the_allowed_values(api_client):
-    response = api_client.get("/api/h9n/mandates/vocabulary", headers=HEADERS)
+    response = api_client.get("/api/h9n/mandates/vocabulary")
     assert response.status_code == 200
     assert response.json() == {"asset_types": ASSET_TYPES, "markets": MARKETS}
 
@@ -595,46 +605,46 @@ def test_api_reports_an_unreadable_mandate_clearly(api_client, monkeypatch):
     monkeypatch.setattr(mandate_api, "get_mandate_repository", lambda: repository)
     params = {"organization_id": str(organization_id)}
 
-    listed = api_client.get("/api/h9n/mandates", params=params, headers=HEADERS)
+    listed = api_client.get("/api/h9n/mandates", params=params)
     assert listed.status_code == 200 and [item["id"] for item in listed.json()["mandates"]] == [str(good.id)]
 
-    fetched = api_client.get(f"/api/h9n/mandates/{bad.id}", params=params, headers=HEADERS)
+    fetched = api_client.get(f"/api/h9n/mandates/{bad.id}", params=params)
     assert fetched.status_code == 500
     assert "can't read" in fetched.json()["detail"] and "could not be reached" not in fetched.text
 
 
 def test_a_misspelled_field_in_an_edit_is_rejected_not_silently_dropped(api_client):
     url, params = _url()
-    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+    created = api_client.post(url, params=params, json=DEMO_MANDATE.model_dump(mode="json")).json()
 
     typo = {key: value for key, value in created.items() if key != "description"}
     typo["descripton"] = "Oops"
-    response = api_client.put(f"{url}/{created['id']}", params=params, headers=HEADERS, json=typo)
+    response = api_client.put(f"{url}/{created['id']}", params=params, json=typo)
 
     assert response.status_code == 422
-    saved = api_client.get(f"{url}/{created['id']}", params=params, headers=HEADERS).json()
+    saved = api_client.get(f"{url}/{created['id']}", params=params).json()
     assert saved["description"] == DEMO_MANDATE.description and saved["version"] == 1
 
 
 @pytest.mark.parametrize("left_out", ["description", "is_demo", "criteria", "name", "version"])
 def test_an_edit_must_send_every_field(api_client, left_out):
     url, params = _url()
-    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+    created = api_client.post(url, params=params, json=DEMO_MANDATE.model_dump(mode="json")).json()
 
     edit = {key: value for key, value in created.items() if key != left_out}
-    response = api_client.put(f"{url}/{created['id']}", params=params, headers=HEADERS, json=edit)
+    response = api_client.put(f"{url}/{created['id']}", params=params, json=edit)
 
     assert response.status_code == 422
-    saved = api_client.get(f"{url}/{created['id']}", params=params, headers=HEADERS).json()
+    saved = api_client.get(f"{url}/{created['id']}", params=params).json()
     assert saved["is_demo"] is True and saved["description"] == DEMO_MANDATE.description
 
 
 def test_an_edit_may_send_back_the_read_only_fields_but_cannot_change_them(api_client):
     url, params = _url()
-    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+    created = api_client.post(url, params=params, json=DEMO_MANDATE.model_dump(mode="json")).json()
 
     edit = {**created, "id": str(uuid4()), "organization_id": str(uuid4()), "is_archived": True}
-    response = api_client.put(f"{url}/{created['id']}", params=params, headers=HEADERS, json=edit)
+    response = api_client.put(f"{url}/{created['id']}", params=params, json=edit)
 
     assert response.status_code == 200
     body = response.json()
@@ -649,7 +659,7 @@ def test_an_edit_that_clears_the_description_must_say_so_explicitly():
 
 def test_archiving_a_mandate_that_vanishes_midway_is_a_404(api_client, monkeypatch):
     url, params = _url()
-    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+    created = api_client.post(url, params=params, json=DEMO_MANDATE.model_dump(mode="json")).json()
     repository = mandate_api.get_mandate_repository()
     real_fetch = repository._fetch_row
 
@@ -659,7 +669,7 @@ def test_archiving_a_mandate_that_vanishes_midway_is_a_404(api_client, monkeypat
         return row
 
     monkeypatch.setattr(repository, "_fetch_row", fetch_then_organization_is_deleted)
-    response = api_client.post(f"{url}/{created['id']}/archive", params=params, headers=HEADERS)
+    response = api_client.post(f"{url}/{created['id']}/archive", params=params)
     assert response.status_code == 404
 
 
@@ -679,10 +689,10 @@ def test_the_demo_script_explains_an_unknown_organization(capsys, monkeypatch):
 
 def test_an_unknown_extra_field_in_an_edit_is_rejected_even_when_nothing_is_missing(api_client):
     url, params = _url()
-    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+    created = api_client.post(url, params=params, json=DEMO_MANDATE.model_dump(mode="json")).json()
 
     response = api_client.put(
-        f"{url}/{created['id']}", params=params, headers=HEADERS, json={**created, "notes": "would be lost"}
+        f"{url}/{created['id']}", params=params, json={**created, "notes": "would be lost"}
     )
 
     assert response.status_code == 422
@@ -774,7 +784,7 @@ def test_every_market_alias_means_exactly_one_market():
 def test_absurd_numbers_and_booleans_are_a_422_not_a_crash(api_client, key_metrics):
     url, params = _url()
     body = {"name": "Huge", "criteria": {"key_metrics": key_metrics}}
-    response = api_client.post(url, params=params, headers=HEADERS, json=body)
+    response = api_client.post(url, params=params, json=body)
     assert response.status_code == 422
     assert api_client.fake.mandates.rows == []
 
@@ -787,9 +797,9 @@ def test_a_hand_edited_huge_number_does_not_break_the_list(api_client, monkeypat
     monkeypatch.setattr(mandate_api, "get_mandate_repository", lambda: repository)
     params = {"organization_id": str(organization_id)}
 
-    listed = api_client.get("/api/h9n/mandates", params=params, headers=HEADERS)
+    listed = api_client.get("/api/h9n/mandates", params=params)
     assert listed.status_code == 200 and [item["id"] for item in listed.json()["mandates"]] == [str(good.id)]
-    assert api_client.get(f"/api/h9n/mandates/{bad.id}", params=params, headers=HEADERS).status_code == 500
+    assert api_client.get(f"/api/h9n/mandates/{bad.id}", params=params).status_code == 500
 
 
 def test_archiving_an_unreadable_mandate_through_the_api_reports_success(api_client, monkeypatch):
@@ -798,7 +808,7 @@ def test_archiving_an_unreadable_mandate_through_the_api_reports_success(api_cli
     params = {"organization_id": str(organization_id)}
 
     for _ in range(2):  # retries see the same success
-        response = api_client.post(f"/api/h9n/mandates/{bad.id}/archive", params=params, headers=HEADERS)
+        response = api_client.post(f"/api/h9n/mandates/{bad.id}/archive", params=params)
         assert response.status_code == 200
         assert response.json()["is_archived"] is True and "problem" in response.json()
 
@@ -956,7 +966,7 @@ def test_the_list_says_how_many_mandates_it_left_out(api_client, monkeypatch):
     repository, organization_id, good, _ = _save_two_and_break_one(api_client.fake, ORG)
     monkeypatch.setattr(mandate_api, "get_mandate_repository", lambda: repository)
 
-    listed = api_client.get("/api/h9n/mandates", params={"organization_id": str(organization_id)}, headers=HEADERS)
+    listed = api_client.get("/api/h9n/mandates", params={"organization_id": str(organization_id)})
     assert listed.status_code == 200
     assert listed.json()["skipped"] == 1
     assert repository.list_with_skipped(organization_id) == ([good], 1)
@@ -964,11 +974,12 @@ def test_the_list_says_how_many_mandates_it_left_out(api_client, monkeypatch):
 
 def test_the_list_reports_zero_skipped_when_nothing_was_left_out(api_client):
     url, params = _url()
-    api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json"))
-    assert api_client.get(url, params=params, headers=HEADERS).json()["skipped"] == 0
+    api_client.post(url, params=params, json=DEMO_MANDATE.model_dump(mode="json"))
+    assert api_client.get(url, params=params).json()["skipped"] == 0
 
 
 def test_the_vocabulary_route_needs_the_same_access_as_the_others(api_client):
+    main.app.dependency_overrides.pop(get_current_user)
     assert api_client.get("/api/h9n/mandates/vocabulary").status_code == 401
 
 

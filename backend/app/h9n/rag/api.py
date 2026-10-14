@@ -1,13 +1,18 @@
-"""FastAPI routes for internal, source-cited H9N RAG ingestion and retrieval."""
+"""FastAPI routes for source-cited H9N RAG ingestion and retrieval.
+
+Every route requires a signed-in Supabase user (Milestone 2.5) and acts only
+for an organization that user belongs to.
+"""
 
 from __future__ import annotations
 
-import secrets
 from functools import lru_cache
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+
+from backend.app.h9n.auth import AuthenticatedUser, get_current_user, resolve_organization
 
 from .config import RagConfigurationError, get_rag_settings
 from .embeddings import OpenRouterEmbeddingProvider
@@ -34,34 +39,12 @@ def get_rag_service() -> RagService:
         "OPENROUTER_API_KEY",
         "SUPABASE_URL",
         "SUPABASE_SERVICE_ROLE_KEY",
-        "H9N_RAG_INTERNAL_API_KEY",
     )
     return RagService(
         settings=settings,
         repository=SupabaseRagRepository(settings),
         embedding_provider=OpenRouterEmbeddingProvider(settings),
     )
-
-
-def require_internal_rag_access(
-    x_h9n_api_key: str | None = Header(default=None, alias="X-H9N-API-Key"),
-) -> None:
-    """Protect the pre-auth RAG routes from unauthenticated public use.
-
-    This is an internal operator key, not customer authentication. Replace this
-    dependency with Supabase JWT validation plus organization-membership checks
-    before the routes are exposed to customers.
-    """
-    settings = get_rag_settings()
-    try:
-        settings.require("H9N_RAG_INTERNAL_API_KEY")
-    except RagConfigurationError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    if not x_h9n_api_key:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing RAG API key.")
-    if not secrets.compare_digest(x_h9n_api_key, settings.internal_api_key or ""):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid RAG API key.")
 
 
 def _raise_safe_rag_error(exc: Exception) -> None:
@@ -80,10 +63,13 @@ def _raise_safe_rag_error(exc: Exception) -> None:
     "/documents/text",
     response_model=RagIngestResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_internal_rag_access)],
 )
-def ingest_page_text(request: RagIngestTextRequest) -> RagIngestResponse:
+def ingest_page_text(
+    request: RagIngestTextRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> RagIngestResponse:
     """Index page-preserved text from an internal export or approved knowledge source."""
+    resolve_organization(user, request.organization_id)
     try:
         return get_rag_service().ingest_text(request)
     except Exception as exc:  # The mapper intentionally emits only safe error details.
@@ -94,7 +80,6 @@ def ingest_page_text(request: RagIngestTextRequest) -> RagIngestResponse:
     "/documents/pdf",
     response_model=RagIngestResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_internal_rag_access)],
 )
 async def ingest_pdf(
     organization_id: UUID = Form(...),
@@ -102,8 +87,10 @@ async def ingest_pdf(
     deal_id: UUID | None = Form(None),
     is_verified_knowledge: bool = Form(False),
     file: UploadFile = File(...),
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> RagIngestResponse:
     """Upload a text-based PDF, save it privately, and index source-cited chunks."""
+    resolve_organization(user, organization_id)
     settings = get_rag_settings()
     filename = Path(file.filename or "").name
     is_pdf_name = filename.lower().endswith(".pdf")
@@ -138,10 +125,13 @@ async def ingest_pdf(
 @router.post(
     "/search",
     response_model=RagSearchResponse,
-    dependencies=[Depends(require_internal_rag_access)],
 )
-def search_rag(request: RagSearchRequest) -> RagSearchResponse:
+def search_rag(
+    request: RagSearchRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> RagSearchResponse:
     """Return source passages for a semantic query; this endpoint never fabricates an answer."""
+    resolve_organization(user, request.organization_id)
     try:
         return get_rag_service().search(request)
     except Exception as exc:  # The mapper intentionally emits only safe error details.
