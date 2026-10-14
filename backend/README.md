@@ -432,8 +432,10 @@ limit above a trillion, a market both targeted and excluded, an unknown market) 
   partial match or an unknown market as "needs review", not as a pass or fail.**
 
 Wording it can't place confidently is unknown, never a guess: a city in another state or country
-("Portland, ME", "Buffalo, New York", "St. Petersburg, Russia"), or an abbreviation inside a longer
-name ("DC Ranch"). For property types the main noun wins ("Office building with ground-floor retail"
+("Portland, ME", "Buffalo, New York", "St. Petersburg, Russia" - only the last part of a location
+is checked for a country, so "12 Ireland Rd, Austin, TX" still matches), or an abbreviation inside a
+longer name ("DC Ranch"). A bare "Flex" isn't accepted as a mandate entry; say "Industrial" or
+"Flex office". For property types the main noun wins ("Office building with ground-floor retail"
 is `Office`), and a bare "land" only counts when nothing else matches. To add a market, add one line
 (its states and aliases) to `_MARKETS`; an alias listed for two markets fails at startup. Renaming or
 removing a canonical name makes saved mandates that use it unreadable, so pair that with a
@@ -447,7 +449,8 @@ curl -X POST "http://localhost:8000/api/h9n/mandates?organization_id=$ORG" \
   -H "X-H9N-API-Key: $H9N_RAG_INTERNAL_API_KEY" -H "Content-Type: application/json" \
   -d '{"name": "Core Office", "criteria": {"asset_types": ["Office"], "leverage": {"max_ltv": 60}}}'
 
-# List active mandates (add &include_archived=true for all), fetch, edit, archive
+# List active mandates (add &include_archived=true for all) -> {"mandates": [...], "skipped": n}
+# fetch, edit, archive
 GET  /api/h9n/mandates?organization_id=...
 GET  /api/h9n/mandates/{id}?organization_id=...
 PUT  /api/h9n/mandates/{id}?organization_id=...          # the fetched mandate, edited (keeps its "version")
@@ -470,7 +473,8 @@ Things that aren't obvious:
 - **A broken saved mandate doesn't break the rest.** Rows are checked when read. One that no
   longer fits the form (edited by hand, or an old format) is left out of lists and logged;
   fetching it directly returns a 500 naming the mandate and the problem. The list response's
-  `X-H9N-Skipped-Mandates` header says how many were left out, so a UI can show it. (Only data
+  `skipped` count in the list reply (`{"mandates": [...], "skipped": n}`) says how many were left
+  out, so a UI can show it. (Only data
   problems are skipped; a genuine code error still surfaces as an error.) It can still be fixed
   with a PUT, or archived (the archive reply then carries `problem` instead of the criteria). The stored `criteria` carry a `schema_version`: bump it (and upgrade
   old rows) whenever a change would make existing rows invalid.

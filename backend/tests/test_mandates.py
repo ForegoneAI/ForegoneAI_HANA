@@ -297,7 +297,7 @@ def test_api_create_list_get_edit_archive_and_select(api_client):
     mandate = Mandate.model_validate(created.json())
 
     listed = api_client.get(url, params=params, headers=HEADERS)
-    assert [item["id"] for item in listed.json()] == [str(mandate.id)]
+    assert [item["id"] for item in listed.json()["mandates"]] == [str(mandate.id)]
 
     one_url, _ = _url(f"/{mandate.id}")
     assert api_client.get(one_url, params=params, headers=HEADERS).json()["name"] == DEMO_MANDATE.name
@@ -315,7 +315,7 @@ def test_api_create_list_get_edit_archive_and_select(api_client):
     archive_url, _ = _url(f"/{mandate.id}/archive")
     assert api_client.post(archive_url, params=params, headers=HEADERS).json()["is_archived"] is True
     assert api_client.get(select_url, params=params, headers=HEADERS).status_code == 409
-    assert api_client.get(url, params=params, headers=HEADERS).json() == []
+    assert api_client.get(url, params=params, headers=HEADERS).json() == {"mandates": [], "skipped": 0}
 
 
 def test_api_rejects_an_invalid_mandate_with_422(api_client):
@@ -596,7 +596,7 @@ def test_api_reports_an_unreadable_mandate_clearly(api_client, monkeypatch):
     params = {"organization_id": str(organization_id)}
 
     listed = api_client.get("/api/h9n/mandates", params=params, headers=HEADERS)
-    assert listed.status_code == 200 and [item["id"] for item in listed.json()] == [str(good.id)]
+    assert listed.status_code == 200 and [item["id"] for item in listed.json()["mandates"]] == [str(good.id)]
 
     fetched = api_client.get(f"/api/h9n/mandates/{bad.id}", params=params, headers=HEADERS)
     assert fetched.status_code == 500
@@ -788,7 +788,7 @@ def test_a_hand_edited_huge_number_does_not_break_the_list(api_client, monkeypat
     params = {"organization_id": str(organization_id)}
 
     listed = api_client.get("/api/h9n/mandates", params=params, headers=HEADERS)
-    assert listed.status_code == 200 and [item["id"] for item in listed.json()] == [str(good.id)]
+    assert listed.status_code == 200 and [item["id"] for item in listed.json()["mandates"]] == [str(good.id)]
     assert api_client.get(f"/api/h9n/mandates/{bad.id}", params=params, headers=HEADERS).status_code == 500
 
 
@@ -958,15 +958,45 @@ def test_the_list_says_how_many_mandates_it_left_out(api_client, monkeypatch):
 
     listed = api_client.get("/api/h9n/mandates", params={"organization_id": str(organization_id)}, headers=HEADERS)
     assert listed.status_code == 200
-    assert listed.headers[mandate_api.SKIPPED_HEADER] == "1"
+    assert listed.json()["skipped"] == 1
     assert repository.list_with_skipped(organization_id) == ([good], 1)
 
 
-def test_the_list_has_no_skipped_header_when_nothing_was_left_out(api_client):
+def test_the_list_reports_zero_skipped_when_nothing_was_left_out(api_client):
     url, params = _url()
     api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json"))
-    assert mandate_api.SKIPPED_HEADER not in api_client.get(url, params=params, headers=HEADERS).headers
+    assert api_client.get(url, params=params, headers=HEADERS).json()["skipped"] == 0
 
 
 def test_the_vocabulary_route_needs_the_same_access_as_the_others(api_client):
     assert api_client.get("/api/h9n/mandates/vocabulary").status_code == 401
+
+
+# --- Fourth review round ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("100 Canada Dr, Plano, TX", "Dallas-Fort Worth"),
+        ("12 Ireland Rd, Austin, TX", "Austin"),
+        ("North Wales, PA", "Philadelphia"),
+        ("La Canada Flintridge, CA", "Los Angeles"),
+        ("100 Canada Dr, Plano 75024", "Dallas-Fort Worth"),
+        # A location that ends in a foreign country still never matches.
+        ("St. Petersburg, Russia", None),
+        ("Birmingham UK", None),
+        ("Toronto, Ontario, Canada", None),
+    ],
+)
+def test_country_words_inside_a_us_address_do_not_block_a_match(text, expected):
+    assert normalize_market(text) == expected
+
+
+def test_a_bare_flex_mandate_entry_must_say_which_kind():
+    assert canonical_asset_type("Flex") is None
+    assert canonical_asset_type("Flex office") == "Office"
+    with pytest.raises(ValidationError, match="'Flex'"):
+        MandateCriteria(asset_types=["Flex"])
+    # In deal wording "flex" still reads as industrial.
+    assert normalize_asset_type("Flex") == "Industrial"

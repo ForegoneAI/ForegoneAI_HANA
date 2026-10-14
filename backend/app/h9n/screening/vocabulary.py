@@ -149,7 +149,10 @@ _MARKETS: dict[str, tuple[str, tuple[str, ...]]] = {
     "Jacksonville": ("fl", ("jacksonville",)),
     "Kansas City": ("ks mo", ("kansas city", "overland park")),
     "Las Vegas": ("nv", ("las vegas", "henderson nv", "north las vegas")),
-    "Los Angeles": ("ca", ("los angeles", "long beach", "pasadena", "orange county", "irvine", "anaheim")),
+    "Los Angeles": (
+        "ca",
+        ("los angeles", "long beach", "pasadena", "orange county", "irvine", "anaheim", "la canada flintridge"),
+    ),
     "Louisville": ("in ky", ("louisville",)),
     "Memphis": ("ar ms tn", ("memphis",)),
     "Miami": (
@@ -165,7 +168,7 @@ _MARKETS: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "Oklahoma City": ("ok", ("oklahoma city", "okc")),
     "Orlando": ("fl", ("orlando", "kissimmee")),
-    "Philadelphia": ("de md nj pa", ("philadelphia", "philly")),
+    "Philadelphia": ("de md nj pa", ("philadelphia", "philly", "north wales pa", "king of prussia")),
     "Phoenix": ("az", ("phoenix", "scottsdale", "tempe", "mesa", "chandler", "gilbert")),
     "Pittsburgh": ("pa", ("pittsburgh",)),
     "Portland": ("or wa", ("portland or", "portland oregon", "beaverton")),
@@ -273,6 +276,11 @@ for _tier in _TIERS:
         for _phrase in (_name, *_phrases):
             _ASSET_TYPE_LOOKUP.setdefault(_key(_phrase), _name)
 
+# Phrases too ambiguous to accept as a whole mandate entry: "Flex" alone could
+# be flex industrial or flex office, so a mandate must say which. Deal data
+# still reads them (in context).
+_NOT_MANDATE_ALIASES = frozenset({"flex"})
+
 # Each tier's phrases compiled once: (type, phrase length, pattern).
 _COMPILED_TIERS = tuple(
     tuple(
@@ -301,7 +309,7 @@ def canonical_asset_type(text: Optional[str]) -> Optional[str]:
     """For mandate input: the canonical type if `text` IS a canonical name or
     an exact alias ("apartments"), else None. Never searches inside text, so
     "Office and Retail" is rejected rather than saved as Office."""
-    if not text or not str(text).strip():
+    if not text or not str(text).strip() or _key(text) in _NOT_MANDATE_ALIASES:
         return None
     return _ASSET_TYPE_LOOKUP.get(_key(text))
 
@@ -431,13 +439,24 @@ def _candidates(places: list[str], states: set[str]) -> list[tuple[str, bool]]:
     return candidates
 
 
+def _names_a_foreign_country(text: str) -> bool:
+    """Whether the location ends in a foreign country ("St. Petersburg,
+    Russia", "Birmingham UK"). Only the last part is checked, where a country
+    goes, so street and town names like "12 Ireland Rd" or "North Wales" don't
+    count; and it isn't checked at all when a US state is named."""
+    pieces = [piece.strip() for piece in _clean(text).split(",") if piece.strip()]
+    return bool(pieces) and _FOREIGN.search(pieces[-1]) is not None
+
+
 def match_market(text: Optional[str], *, field: Optional[str] = None) -> Optional[MarketMatch]:
     """For deal data: the market a location string is in, with its confidence,
     or None. When a state is named, a market in a different state is never
-    matched; a foreign country never matches."""
-    if not text or not str(text).strip() or _FOREIGN.search(_clean(text)):
+    matched; a location ending in a foreign country never matches."""
+    if not text or not str(text).strip():
         return None
     places, states = _parse_location(str(text))
+    if not states and _names_a_foreign_country(str(text)):
+        return None
     for candidate, partial in _candidates(places, states):
         market = _MARKET_LOOKUP.get(candidate)
         if market and (not states or states & _MARKET_STATES[market]):
