@@ -20,6 +20,7 @@ class FakeMandateTable:
         self.rows: list[dict[str, Any]] = []
         self._clock = datetime(2026, 10, 13, tzinfo=timezone.utc)
         self.fail_with: Optional[Exception] = None
+        self.fail_on_insert: Optional[Exception] = None
 
     def now(self) -> str:
         self._clock += timedelta(seconds=1)
@@ -64,6 +65,8 @@ class _Query:
             raise table.fail_with
 
         if self._action == "insert":
+            if table.fail_on_insert is not None:
+                raise table.fail_on_insert
             now = table.now()
             row = {
                 "id": str(uuid4()),

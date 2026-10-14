@@ -85,9 +85,9 @@ def test_every_criterion_maps_to_a_real_deal_profile_field():
     assert set(CRITERIA_PROFILE_FIELDS.values()) <= set(REPEDealProfile.model_fields)
 
 
-def test_lists_are_trimmed_and_deduplicated_ignoring_case():
-    criteria = MandateCriteria(asset_types=["  Multifamily ", "multifamily", "", "Self  Storage"])
-    assert criteria.asset_types == ["Multifamily", "Self Storage"]
+def test_lists_are_trimmed_deduplicated_and_saved_as_canonical_names():
+    criteria = MandateCriteria(asset_types=["  Multifamily ", "multifamily", "", "Self  Storage", "Apartments"])
+    assert criteria.asset_types == ["Multifamily", "Self-Storage"]
 
 
 @pytest.mark.parametrize(
@@ -195,14 +195,14 @@ def test_two_edits_racing_from_the_same_version_cannot_both_win():
     saved = repository.create(organization_id, DEMO_MANDATE)
 
     # Someone else's edit lands between our read and our write.
-    real_get = repository.get
+    real_fetch = repository._fetch_row
 
-    def get_then_someone_else_edits(org, mandate_id):
-        current = real_get(org, mandate_id)
+    def read_then_someone_else_edits(org, mandate_id):
+        current = real_fetch(org, mandate_id)
         client.mandates.rows[0]["version"] = 2
         return current
 
-    repository.get = get_then_someone_else_edits
+    repository._fetch_row = read_then_someone_else_edits
     with pytest.raises(MandateConflictError):
         repository.update(organization_id, saved.id, MandateUpdate(**DEMO_MANDATE.model_dump(), version=1))
 
@@ -419,3 +419,397 @@ def test_saving_for_an_organization_that_does_not_exist_is_a_clear_error(api_cli
     response = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json"))
     assert response.status_code == 422
     assert "organization" in response.json()["detail"]
+
+
+# --- Code review round 2 -----------------------------------------------------
+
+from backend.app.h9n.screening import mandate as mandate_module  # noqa: E402
+from backend.app.h9n.screening.mandate_repository import MandateDataError  # noqa: E402
+from backend.app.h9n.screening.vocabulary import (  # noqa: E402
+    ASSET_TYPES,
+    MARKETS,
+    normalize_asset_type,
+    normalize_market,
+    profile_asset_type,
+    profile_market,
+)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Multifamily", "Multifamily"),
+        ("Apartments", "Multifamily"),
+        ("Garden-style apartment community", "Multifamily"),
+        ("Student apartments", "Student Housing"),
+        ("Self Storage", "Self-Storage"),
+        ("Cold storage warehouse", "Industrial"),
+        ("Neighborhood shopping center", "Retail"),
+        ("Hotel", "Hospitality"),
+        ("Condominium", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_property_type_wording_maps_to_one_canonical_type(text, expected):
+    assert normalize_asset_type(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Dallas-Fort Worth", "Dallas-Fort Worth"),
+        ("Dallas, TX", "Dallas-Fort Worth"),
+        ("DFW", "Dallas-Fort Worth"),
+        ("Dallas-Fort Worth-Arlington, TX MSA", "Dallas-Fort Worth"),
+        ("4100 Elm St, Plano, TX 75024", "Dallas-Fort Worth"),
+        ("Greater Houston Metro Area", "Houston"),
+        ("Tampa-St. Petersburg-Clearwater", "Tampa"),
+        ("Washington, DC", "Washington, D.C."),
+        ("Portland, OR", "Portland"),
+        # Same city name, different state: never a guessed match.
+        ("Portland, ME", None),
+        ("Charleston, WV", None),
+        ("Columbus, GA", None),
+        ("Washington", None),
+        ("Sun Belt", None),
+        ("Texas", None),
+    ],
+)
+def test_location_wording_maps_to_one_canonical_market(text, expected):
+    assert normalize_market(text) == expected
+
+
+def test_a_deal_profile_and_the_demo_mandate_meet_on_the_same_names():
+    profile = REPEDealProfile(property_type="Garden-style apartment community", location="Dallas, TX")
+    assert profile_asset_type(profile) in DEMO_MANDATE.criteria.asset_types
+    assert profile_market(profile) in DEMO_MANDATE.criteria.target_markets
+    # market is preferred over location when both name a known market.
+    assert profile_market(REPEDealProfile(market="Austin", location="Dallas, TX")) == "Austin"
+    assert profile_market(REPEDealProfile(address="1 Main St, Springfield, IL")) is None
+
+
+def test_mandate_lists_only_accept_known_values_and_store_canonical_names():
+    criteria = MandateCriteria(asset_types=["apartments"], target_markets=["DFW", "Dallas, TX", "Austin"])
+    assert criteria.asset_types == ["Multifamily"]
+    assert criteria.target_markets == ["Dallas-Fort Worth", "Austin"]
+    with pytest.raises(ValidationError, match=r"Unknown markets: 'Sun Belt'"):
+        MandateCriteria(target_markets=["Sun Belt", "Austin"])
+    with pytest.raises(ValidationError, match="Unknown property types: 'Condominium'"):
+        MandateCriteria(asset_types=["Condominium"])
+    # "DFW" targeted and "Dallas, TX" excluded are the same market.
+    with pytest.raises(ValidationError, match="both targeted and excluded"):
+        MandateCriteria(target_markets=["DFW"], excluded_markets=["Dallas, TX"])
+
+
+def test_the_demo_mandate_only_uses_canonical_values():
+    assert set(DEMO_MANDATE.criteria.asset_types) <= set(ASSET_TYPES)
+    assert set(DEMO_MANDATE.criteria.target_markets) <= set(MARKETS)
+
+
+def test_the_vocabulary_route_lists_the_allowed_values(api_client):
+    response = api_client.get("/api/h9n/mandates/vocabulary")
+    assert response.status_code == 200
+    assert response.json() == {"asset_types": ASSET_TYPES, "markets": MARKETS}
+
+
+@pytest.mark.parametrize(
+    "key_metrics", [{"units": {"min": 10.5}}, {"year_built": {"min": 1999.5}}, {"year_built": {"max": 2010.25}}]
+)
+def test_unit_counts_and_years_must_be_whole_numbers(key_metrics):
+    with pytest.raises(ValidationError, match="whole numbers"):
+        MandateCriteria(key_metrics=key_metrics)
+
+
+def test_whole_number_limits_are_stored_as_integers():
+    criteria = MandateCriteria(key_metrics={"year_built": {"min": 1999.0}, "units": {"max": 400}})
+    dumped = criteria.model_dump(mode="json")["key_metrics"]
+    assert dumped["year_built"]["min"] == 1999 and isinstance(dumped["year_built"]["min"], int)
+    assert dumped["units"]["max"] == 400 and isinstance(dumped["units"]["max"], int)
+
+
+def test_numeric_field_check_uses_real_types_not_type_names():
+    assert mandate_module._profile_number_types("units") == {int}
+    assert mandate_module._profile_number_types("cap_rate") == {float}
+    assert mandate_module._profile_number_types("deal_name") == set()
+    assert mandate_module._INTEGER_FIELDS == {"units", "year_built"}
+
+
+def test_numeric_field_check_rejects_a_type_whose_name_merely_contains_int(monkeypatch):
+    class Point:  # "Point" contains "int"; the old text check would have passed it
+        pass
+
+    field = REPEDealProfile.model_fields["cap_rate"]
+    monkeypatch.setattr(field, "annotation", Point | None)
+    assert mandate_module._profile_number_types("cap_rate") == set()
+    with pytest.raises(RuntimeError, match="key_metrics.cap_rate must map to a numeric"):
+        mandate_module._check_mapping()
+
+
+def test_saved_criteria_carry_a_schema_version():
+    client = FakeSupabaseClient()
+    _repository(client).create(uuid4(), DEMO_MANDATE)
+    assert client.mandates.rows[0]["criteria"]["schema_version"] == mandate_module.CRITERIA_SCHEMA_VERSION
+    with pytest.raises(ValidationError):
+        MandateCriteria(asset_types=["Office"], schema_version=2)
+
+
+def _save_two_and_break_one(client, organization_id=None):
+    repository = _repository(client)
+    organization_id = organization_id or uuid4()
+    good = repository.create(organization_id, _input("Good"))
+    bad = repository.create(organization_id, _input("Bad"))
+    row = next(row for row in client.mandates.rows if row["id"] == str(bad.id))
+    row["criteria"]["surprise_field"] = True  # e.g. edited by hand in the database
+    return repository, organization_id, good, bad
+
+
+def test_one_unreadable_mandate_does_not_break_the_list(caplog):
+    repository, organization_id, good, bad = _save_two_and_break_one(FakeSupabaseClient())
+
+    assert [m.id for m in repository.list(organization_id)] == [good.id]
+    assert str(bad.id) in caplog.text
+    with pytest.raises(MandateDataError, match=str(bad.id)):
+        repository.get(organization_id, bad.id)
+    with pytest.raises(MandateDataError):
+        select_mandate_for_screening(repository, organization_id, bad.id)
+
+
+def test_an_unreadable_mandate_can_still_be_repaired_or_archived():
+    repository, organization_id, _, bad = _save_two_and_break_one(FakeSupabaseClient())
+
+    fixed = repository.update(organization_id, bad.id, MandateUpdate(**_input("Bad").model_dump(), version=1))
+    assert fixed.version == 2 and repository.get(organization_id, bad.id).id == bad.id
+
+    repository, organization_id, _, bad = _save_two_and_break_one(FakeSupabaseClient())
+    archived = repository.archive(organization_id, bad.id)
+    assert archived.is_archived and archived.id == bad.id and "surprise_field" in archived.problem
+    # Archiving again reports the same success, and the broken row is out of the way.
+    assert repository.archive(organization_id, bad.id).is_archived
+    assert [m.name for m in repository.list(organization_id)] == ["Good"]
+
+
+def test_api_reports_an_unreadable_mandate_clearly(api_client, monkeypatch):
+    repository, organization_id, good, bad = _save_two_and_break_one(api_client.fake, ORG)
+    monkeypatch.setattr(mandate_api, "get_mandate_repository", lambda: repository)
+    params = {"organization_id": str(organization_id)}
+
+    listed = api_client.get("/api/h9n/mandates", params=params, headers=HEADERS)
+    assert listed.status_code == 200 and [item["id"] for item in listed.json()] == [str(good.id)]
+
+    fetched = api_client.get(f"/api/h9n/mandates/{bad.id}", params=params, headers=HEADERS)
+    assert fetched.status_code == 500
+    assert "can't read" in fetched.json()["detail"] and "could not be reached" not in fetched.text
+
+
+def test_a_misspelled_field_in_an_edit_is_rejected_not_silently_dropped(api_client):
+    url, params = _url()
+    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+
+    typo = {key: value for key, value in created.items() if key != "description"}
+    typo["descripton"] = "Oops"
+    response = api_client.put(f"{url}/{created['id']}", params=params, headers=HEADERS, json=typo)
+
+    assert response.status_code == 422
+    saved = api_client.get(f"{url}/{created['id']}", params=params, headers=HEADERS).json()
+    assert saved["description"] == DEMO_MANDATE.description and saved["version"] == 1
+
+
+@pytest.mark.parametrize("left_out", ["description", "is_demo", "criteria", "name", "version"])
+def test_an_edit_must_send_every_field(api_client, left_out):
+    url, params = _url()
+    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+
+    edit = {key: value for key, value in created.items() if key != left_out}
+    response = api_client.put(f"{url}/{created['id']}", params=params, headers=HEADERS, json=edit)
+
+    assert response.status_code == 422
+    saved = api_client.get(f"{url}/{created['id']}", params=params, headers=HEADERS).json()
+    assert saved["is_demo"] is True and saved["description"] == DEMO_MANDATE.description
+
+
+def test_an_edit_may_send_back_the_read_only_fields_but_cannot_change_them(api_client):
+    url, params = _url()
+    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+
+    edit = {**created, "id": str(uuid4()), "organization_id": str(uuid4()), "is_archived": True}
+    response = api_client.put(f"{url}/{created['id']}", params=params, headers=HEADERS, json=edit)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == created["id"] and body["organization_id"] == created["organization_id"]
+    assert body["is_archived"] is False
+
+
+def test_an_edit_that_clears_the_description_must_say_so_explicitly():
+    update = MandateUpdate(**{**DEMO_MANDATE.model_dump(), "description": None, "version": 1})
+    assert update.description is None
+
+
+def test_archiving_a_mandate_that_vanishes_midway_is_a_404(api_client, monkeypatch):
+    url, params = _url()
+    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+    repository = mandate_api.get_mandate_repository()
+    real_fetch = repository._fetch_row
+
+    def fetch_then_organization_is_deleted(org, mandate_id):
+        row = real_fetch(org, mandate_id)
+        api_client.fake.mandates.rows.clear()
+        return row
+
+    monkeypatch.setattr(repository, "_fetch_row", fetch_then_organization_is_deleted)
+    response = api_client.post(f"{url}/{created['id']}/archive", params=params, headers=HEADERS)
+    assert response.status_code == 404
+
+
+def test_the_demo_script_explains_an_unknown_organization(capsys, monkeypatch):
+    from backend.scripts import create_demo_mandate as script
+
+    fake = FakeSupabaseClient()
+    fake.mandates.fail_on_insert = APIError({"code": "23503", "message": "violates foreign key constraint"})
+    monkeypatch.setattr(script, "SupabaseMandateRepository", lambda settings: _repository(fake))
+    monkeypatch.setattr(script.RagSettings, "from_environment", classmethod(lambda cls: _settings()))
+
+    exit_code = script.main(["--organization-id", str(uuid4())])
+
+    assert exit_code == 1
+    assert "No organization with id" in capsys.readouterr().out
+
+
+def test_an_unknown_extra_field_in_an_edit_is_rejected_even_when_nothing_is_missing(api_client):
+    url, params = _url()
+    created = api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json")).json()
+
+    response = api_client.put(
+        f"{url}/{created['id']}", params=params, headers=HEADERS, json={**created, "notes": "would be lost"}
+    )
+
+    assert response.status_code == 422
+    assert "notes" in response.text
+
+
+# --- Second review round -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Buffalo, New York",
+        "Albany, New York",
+        "Columbus, Mississippi",
+        "Jacksonville, Arkansas",
+        "Durham, New Hampshire",
+        "Houston, Mississippi",
+        "Birmingham, UK",
+        "Durham, UK",
+        "San Jose, Costa Rica",
+        "Washington",
+    ],
+)
+def test_a_place_in_another_state_or_country_never_matches_a_market(text):
+    assert normalize_market(text) is None
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Franklin, Tennessee", "Nashville"),
+        ("Aurora, Colorado", "Denver"),
+        ("Cary, North Carolina", "Raleigh-Durham"),
+        ("Orange County", "Los Angeles"),
+        ("Orange County, CA", "Los Angeles"),
+        ("DC", "Washington, D.C."),
+        ("Washington-Arlington-Alexandria, DC-VA-MD-WV", "Washington, D.C."),
+        ("Dallas, Uptown or Downtown", "Dallas-Fort Worth"),  # "or" is not Oregon
+        ("Uptown Dallas", "Dallas-Fort Worth"),
+        ("Dallas TX 75201", "Dallas-Fort Worth"),
+        ("Fort Worth Ave, Austin, TX", "Austin"),  # the city wins over a street name
+        ("Seattle, Washington", "Seattle"),
+        ("New York", "New York"),
+    ],
+)
+def test_more_real_world_location_wording(text, expected):
+    assert normalize_market(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Multifamily development site", "Land"),
+        ("Land for development (multifamily)", "Land"),
+        ("Industrial land", "Land"),
+        ("Apartment community on 12 acres of land", "Multifamily"),
+        ("Office building with ground-floor retail", "Office"),
+        ("Office/Retail", "Office"),
+        ("Flex office space", "Office"),
+        ("Flex industrial", "Industrial"),
+        ("Senior apartments", "Senior Housing"),
+        ("Age-restricted apartments", "Senior Housing"),
+        ("Seniors housing", "Senior Housing"),
+        ("Medical office building", "Medical Office"),
+    ],
+)
+def test_the_main_property_type_wins_over_side_mentions(text, expected):
+    assert normalize_asset_type(text) == expected
+
+
+def test_every_market_alias_means_exactly_one_market():
+    from backend.app.h9n.screening import vocabulary
+
+    assert set(vocabulary._MARKET_LOOKUP.values()) == set(MARKETS)
+    assert set(vocabulary._MARKET_STATES) == set(MARKETS)
+
+
+@pytest.mark.parametrize(
+    "key_metrics",
+    [
+        {"units": {"min": 10**400}},
+        {"cap_rate": {"min": 10**400}},
+        {"noi": {"min": 10**400, "max": 1}},
+        {"units": {"min": True}},
+        {"cap_rate": {"max": False}},
+    ],
+)
+def test_absurd_numbers_and_booleans_are_a_422_not_a_crash(api_client, key_metrics):
+    url, params = _url()
+    body = {"name": "Huge", "criteria": {"key_metrics": key_metrics}}
+    response = api_client.post(url, params=params, headers=HEADERS, json=body)
+    assert response.status_code == 422
+    assert api_client.fake.mandates.rows == []
+
+
+def test_a_hand_edited_huge_number_does_not_break_the_list(api_client, monkeypatch):
+    repository, organization_id, good, bad = _save_two_and_break_one(api_client.fake, ORG)
+    row = next(row for row in api_client.fake.mandates.rows if row["id"] == str(bad.id))
+    del row["criteria"]["surprise_field"]
+    row["criteria"]["key_metrics"] = {"units": {"min": 10**400}}
+    monkeypatch.setattr(mandate_api, "get_mandate_repository", lambda: repository)
+    params = {"organization_id": str(organization_id)}
+
+    listed = api_client.get("/api/h9n/mandates", params=params, headers=HEADERS)
+    assert listed.status_code == 200 and [item["id"] for item in listed.json()] == [str(good.id)]
+    assert api_client.get(f"/api/h9n/mandates/{bad.id}", params=params, headers=HEADERS).status_code == 500
+
+
+def test_archiving_an_unreadable_mandate_through_the_api_reports_success(api_client, monkeypatch):
+    repository, organization_id, _, bad = _save_two_and_break_one(api_client.fake, ORG)
+    monkeypatch.setattr(mandate_api, "get_mandate_repository", lambda: repository)
+    params = {"organization_id": str(organization_id)}
+
+    for _ in range(2):  # retries see the same success
+        response = api_client.post(f"/api/h9n/mandates/{bad.id}/archive", params=params, headers=HEADERS)
+        assert response.status_code == 200
+        assert response.json()["is_archived"] is True and "problem" in response.json()
+
+
+def test_the_demo_script_exits_cleanly_when_the_demo_already_exists(capsys, monkeypatch):
+    from backend.scripts import create_demo_mandate as script
+
+    repository = _repository()
+    organization_id = uuid4()
+    repository.create(organization_id, DEMO_MANDATE)
+    monkeypatch.setattr(script, "SupabaseMandateRepository", lambda settings: repository)
+    monkeypatch.setattr(script.RagSettings, "from_environment", classmethod(lambda cls: _settings()))
+
+    assert script.main(["--organization-id", str(organization_id)]) == 0
+    assert "already exists" in capsys.readouterr().out

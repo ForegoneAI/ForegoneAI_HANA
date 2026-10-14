@@ -6,6 +6,7 @@
     PUT  /api/h9n/mandates/{id}                 edit one (send the version you edited)
     POST /api/h9n/mandates/{id}/archive         retire one (kept for history)
     GET  /api/h9n/mandates/{id}/for-screening   select one for a screening
+    GET  /api/h9n/mandates/vocabulary           the allowed property types and markets
 
 Every route acts for one organization, given as `?organization_id=...`.
 
@@ -27,9 +28,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from backend.app.h9n.rag.api import require_internal_rag_access
 from backend.app.h9n.rag.config import RagConfigurationError, get_rag_settings
 from backend.app.h9n.screening.mandate import Mandate, MandateInput, MandateUpdate
+from backend.app.h9n.screening.vocabulary import ASSET_TYPES, MARKETS
 from backend.app.h9n.screening.mandate_repository import (
+    ArchivedUnreadableMandate,
     MandateArchivedError,
     MandateConflictError,
+    MandateDataError,
     MandateNotFoundError,
     MandateOrganizationError,
     MandateRepository,
@@ -70,6 +74,10 @@ def _call(action: Callable[[MandateRepository], T]) -> T:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except MandateOrganizationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MandateDataError as exc:
+        # Our stored data is at fault, not the request: a clear 500 that says
+        # which mandate and how to recover, instead of "could not be reached".
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     except RagConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:  # Database details go to the log, never to the caller.
@@ -83,6 +91,14 @@ def list_mandates(
     organization_id: UUID = Depends(_organization_for_request),
 ) -> list[Mandate]:
     return _call(lambda repository: repository.list(organization_id, include_archived=include_archived))
+
+
+@router.get("/vocabulary")
+def mandate_vocabulary() -> dict[str, list[str]]:
+    """The property types and markets a mandate may use (for a UI's pickers).
+    The same fixed lists for every organization, so no organization is needed.
+    Common wording ("Apartments", "DFW") is also accepted and saved as these."""
+    return {"asset_types": ASSET_TYPES, "markets": MARKETS}
 
 
 @router.post("", response_model=Mandate, status_code=status.HTTP_201_CREATED)
@@ -110,11 +126,13 @@ def update_mandate(
     return _call(lambda repository: repository.update(organization_id, mandate_id, update))
 
 
-@router.post("/{mandate_id}/archive", response_model=Mandate)
+@router.post("/{mandate_id}/archive", response_model=Mandate | ArchivedUnreadableMandate)
 def archive_mandate(
     mandate_id: UUID,
     organization_id: UUID = Depends(_organization_for_request),
-) -> Mandate:
+) -> Mandate | ArchivedUnreadableMandate:
+    """Archives a mandate. An unreadable one is archived too; the reply then
+    has `problem` instead of its criteria."""
     return _call(lambda repository: repository.archive(organization_id, mandate_id))
 
 

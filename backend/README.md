@@ -405,15 +405,28 @@ deal can later be screened against it (M3.2). It's a small editable form, define
 | Section | Example | Checked against (Deal Profile field) |
 |---|---|---|
 | `asset_types` | `["Multifamily"]` | `property_type` |
-| `target_markets` / `excluded_markets` | `["Austin", "Phoenix"]` | `market` |
+| `target_markets` / `excluded_markets` | `["Austin", "Phoenix"]` | `market`, else `submarket`, `location`, `address` |
 | `deal_size` | `{"min": 5000000, "max": 50000000}` | `asking_price` |
 | `key_metrics` | `{"cap_rate": {"min": 5.5}}` | the field of the same name |
 | `leverage` | `{"max_ltv": 65}` | `ltv`, `interest_rate` |
 | `preferences` | `["Value-add business plan"]` | nothing - soft, shown to reviewers only |
 
-Units match the Deal Profile: dollars, and percentages as numbers (6.5 means 6.5%). Empty sections
-mean "no requirement", but a mandate needs at least one hard criterion. Invalid mandates (min above
-max, a 550% cap rate, a market both targeted and excluded) are rejected with a 422 and never saved.
+Units match the Deal Profile: dollars, and percentages as numbers (6.5 means 6.5%); unit counts and
+years must be whole numbers. Empty sections mean "no requirement", but a mandate needs at least one
+hard criterion. Invalid mandates (min above max, a 550% cap rate, 10.5 units, `true` as a number, a
+limit above a trillion, a market both targeted and excluded, an unknown market) are rejected with a
+422 and never saved.
+
+**Property types and markets come from fixed lists** (`app/h9n/screening/vocabulary.py`; also
+`GET /api/h9n/mandates/vocabulary`). The extractor keeps a document's own wording, so the same
+lists are used on both sides: common wording is accepted and saved as the canonical name
+("Apartments" -> `Multifamily`, "DFW" -> `Dallas-Fort Worth`), and M3.2 should read a profile with
+`profile_asset_type()` / `profile_market()`, which turn "Garden-style apartment community" or
+"12 Elm St, Plano, TX" into the same names. Unrecognized wording becomes "unknown", never a guess:
+a city in a different state or country is never matched ("Portland, ME", "Buffalo, New York",
+"Birmingham, UK"), and for property types the main noun wins ("Office building with ground-floor
+retail" is `Office`; "Multifamily development site" is `Land`). To support a new type or market,
+add it and its aliases to `vocabulary.py`; an alias listed for two markets fails at startup.
 
 Routes (internal API key and `?organization_id=` required, like run recording above):
 
@@ -437,21 +450,31 @@ Things that aren't obvious:
 
 - **Edits name the version they started from.** Every edit bumps `version` (archiving doesn't);
   an edit based on an older version gets a 409 instead of silently overwriting someone else's
-  change. PUT replaces the whole mandate, so send everything back, not just the changed part.
-  Screening results should store the mandate `version` they used.
+  change. Screening results should store the mandate `version` they used.
+- **An edit is the whole mandate.** PUT needs every field (`name`, `description` - `null` to
+  clear it - `criteria`, `is_demo`, `version`). A fetched mandate can be sent straight back: its
+  read-only fields (`id`, `organization_id`, `created_at`, `updated_at`, `is_archived`) are
+  ignored. Any other unknown field, such as a typo like `descripton`, is a 422, so a typo can't
+  quietly erase data.
+- **A broken saved mandate doesn't break the rest.** Rows are checked when read. One that no
+  longer fits the form (edited by hand, or an old format) is left out of lists and logged;
+  fetching it directly returns a 500 naming the mandate and the problem. It can still be fixed
+  with a PUT, or archived (the archive reply then carries `problem` instead of the criteria). The stored `criteria` carry a `schema_version`: bump it (and upgrade
+  old rows) whenever a change would make existing rows invalid.
 - **Archive, don't delete.** Archived mandates disappear from the list and can't be edited or
   selected, but stay in the database so old screenings still show their criteria. Active names
   must be unique per organization (ignoring case).
-- **Category wording isn't normalized yet.** `asset_types` and markets are plain text; M3.2 has to
-  decide how "Multifamily" matches an extracted "Apartment" until shared vocabularies exist.
 - **Demo mandate:** `python -m backend.scripts.create_demo_mandate --organization-id <uuid>` saves
-  "Demo - Sun Belt Value-Add Multifamily" (marked `is_demo`, safe to run twice).
+  "Demo - Sun Belt Value-Add Multifamily" (marked `is_demo`, safe to run twice; a wrong
+  organization id prints a message instead of crashing).
 - **Setup:** apply `supabase/migrations/20261013_create_h9n_investment_mandates.sql` after the two
   migrations above.
 - **Known gap - roles:** any member of an organization can create, edit and archive its mandates,
   including `viewer`s. Restricting edits to admins needs the member's role from sign-in (M2.5).
-- **Sign-in:** access is checked in one place (`_organization_for_request` in
-  `app/h9n/screening/api.py`); swap it for the signed-in user once M2.5 lands.
+- **Security - before customers use this:** until sign-in (M2.5) lands, anyone with the shared
+  internal API key can pass any `organization_id` and read or edit that organization's mandates.
+  Access is checked in one place (`_organization_for_request` in `app/h9n/screening/api.py`), and
+  switching it to the signed-in user's organizations is part of the M2.5 work, not a separate task.
 
 ## Settings
 

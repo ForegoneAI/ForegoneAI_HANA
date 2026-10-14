@@ -23,13 +23,15 @@ from backend.app.h9n.rag.config import RagSettings
 from backend.app.h9n.screening.mandate import DEMO_MANDATE
 from backend.app.h9n.screening.mandate_repository import (
     MandateConflictError,
+    MandateOrganizationError,
     MandateRepository,
     SupabaseMandateRepository,
 )
 
 
 def create_demo_mandate(repository: MandateRepository, organization_id: UUID) -> tuple[bool, str]:
-    """(created?, message). Leaves an existing demo mandate untouched."""
+    """(created?, message). Leaves an existing demo mandate untouched.
+    Raises MandateOrganizationError if the organization doesn't exist."""
     for mandate in repository.list(organization_id):
         if mandate.name.lower() == DEMO_MANDATE.name.lower():
             kind = "Demo mandate" if mandate.is_demo else "A non-demo mandate with the demo's name"
@@ -48,7 +50,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     repository = SupabaseMandateRepository(RagSettings.from_environment())
-    _, message = create_demo_mandate(repository, args.organization_id)
+    try:
+        _, message = create_demo_mandate(repository, args.organization_id)
+    except MandateOrganizationError:
+        print(f"No organization with id {args.organization_id} exists in Supabase; nothing changed.")
+        return 1
     print(message)
     return 0
 

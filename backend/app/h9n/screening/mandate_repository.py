@@ -8,14 +8,23 @@ treated exactly like one that doesn't exist.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Protocol
 from uuid import UUID
 
 from postgrest.exceptions import APIError
+from pydantic import BaseModel, ValidationError
 from supabase import Client, create_client
 
 from backend.app.h9n.rag.config import RagSettings
 from backend.app.h9n.screening.mandate import Mandate, MandateInput, MandateUpdate
+
+logger = logging.getLogger(__name__)
+
+# What a stored row that no longer fits the form can raise when read. Besides
+# validation errors, a hand-edited number too large for Python to compare
+# raises OverflowError.
+_UNREADABLE = (ValidationError, ValueError, TypeError, OverflowError)
 
 TABLE = "investment_mandates"
 
@@ -41,6 +50,22 @@ class MandateOrganizationError(MandateError):
     """The organization the mandate was saved for doesn't exist."""
 
 
+class MandateDataError(MandateError):
+    """A saved mandate's data no longer fits the mandate form (for example it
+    was edited by hand in the database), so it can't be used as-is."""
+
+
+class ArchivedUnreadableMandate(BaseModel):
+    """The reply when an unreadable mandate (see MandateDataError) is archived:
+    the archive worked, but its criteria can't be shown."""
+
+    id: UUID
+    organization_id: UUID
+    is_archived: bool = True
+    version: int
+    problem: str
+
+
 class MandateArchivedError(MandateError):
     """An archived mandate can't be edited or selected for a new screening."""
 
@@ -56,7 +81,7 @@ class MandateRepository(Protocol):
 
     def update(self, organization_id: UUID, mandate_id: UUID, update: MandateUpdate) -> Mandate: ...
 
-    def archive(self, organization_id: UUID, mandate_id: UUID) -> Mandate: ...
+    def archive(self, organization_id: UUID, mandate_id: UUID) -> "Mandate | ArchivedUnreadableMandate": ...
 
 
 def _row_for(mandate: MandateInput) -> dict[str, Any]:
@@ -87,13 +112,39 @@ class SupabaseMandateRepository:
         self._client = client or create_client(settings.supabase_url, settings.supabase_service_role_key)
 
     def list(self, organization_id: UUID, *, include_archived: bool = False) -> list[Mandate]:
+        """The organization's mandates. A row that can't be read is left out
+        (and logged) so one bad row never hides all the others."""
         query = self._client.table(TABLE).select("*").eq("organization_id", str(organization_id))
         if not include_archived:
             query = query.eq("is_archived", False)
         response = query.order("name").execute()
-        return [Mandate.model_validate(row) for row in response.data or []]
+        mandates = []
+        for row in response.data or []:
+            try:
+                mandates.append(Mandate.model_validate(row))
+            except _UNREADABLE as exc:
+                logger.error(
+                    "Skipping unreadable mandate %s (organization %s): %s",
+                    row.get("id"),
+                    organization_id,
+                    _problems(exc),
+                )
+        return mandates
 
     def get(self, organization_id: UUID, mandate_id: UUID) -> Mandate:
+        row = self._fetch_row(organization_id, mandate_id)
+        try:
+            return Mandate.model_validate(row)
+        except _UNREADABLE as exc:
+            logger.error("Unreadable mandate %s (organization %s): %s", mandate_id, organization_id, _problems(exc))
+            raise MandateDataError(
+                f"Mandate {mandate_id} is saved in a form this version of H9N can't read "
+                f"({_problems(exc)}). Fix it by saving a corrected version (PUT), or archive it."
+            ) from exc
+
+    def _fetch_row(self, organization_id: UUID, mandate_id: UUID) -> dict[str, Any]:
+        """The raw row, unchecked, so even an unreadable mandate can still be
+        corrected or archived."""
         response = (
             self._client.table(TABLE)
             .select("*")
@@ -103,7 +154,7 @@ class SupabaseMandateRepository:
         )
         if not response.data:
             raise MandateNotFoundError(f"No mandate found with id {mandate_id}.")
-        return Mandate.model_validate(response.data[0])
+        return response.data[0]
 
     def create(self, organization_id: UUID, mandate: MandateInput) -> Mandate:
         row = {**_row_for(mandate), "organization_id": str(organization_id)}
@@ -117,12 +168,12 @@ class SupabaseMandateRepository:
         return Mandate.model_validate(response.data[0])
 
     def update(self, organization_id: UUID, mandate_id: UUID, update: MandateUpdate) -> Mandate:
-        current = self.get(organization_id, mandate_id)
-        if current.is_archived:
+        current = self._fetch_row(organization_id, mandate_id)
+        if current.get("is_archived"):
             raise MandateArchivedError("This mandate is archived and can't be edited.")
-        if current.version != update.version:
+        if current.get("version") != update.version:
             raise MandateConflictError(
-                f"This mandate was changed by someone else (now version {current.version}, "
+                f"This mandate was changed by someone else (now version {current.get('version')}, "
                 f"your edit was based on version {update.version}). Reload it and try again."
             )
         row = {**_row_for(update), "version": update.version + 1}
@@ -145,18 +196,44 @@ class SupabaseMandateRepository:
             raise MandateConflictError("This mandate was changed by someone else. Reload it and try again.")
         return Mandate.model_validate(response.data[0])
 
-    def archive(self, organization_id: UUID, mandate_id: UUID) -> Mandate:
-        current = self.get(organization_id, mandate_id)
-        if current.is_archived:
-            return current
-        response = (
-            self._client.table(TABLE)
-            .update({"is_archived": True})
-            .eq("organization_id", str(organization_id))
-            .eq("id", str(mandate_id))
-            .execute()
-        )
-        return Mandate.model_validate(response.data[0])
+    def archive(self, organization_id: UUID, mandate_id: UUID) -> "Mandate | ArchivedUnreadableMandate":
+        current = self._fetch_row(organization_id, mandate_id)
+        if not current.get("is_archived"):
+            response = (
+                self._client.table(TABLE)
+                .update({"is_archived": True})
+                .eq("organization_id", str(organization_id))
+                .eq("id", str(mandate_id))
+                .execute()
+            )
+            if not response.data:
+                # The row vanished between the read and the update (e.g. its
+                # organization was deleted).
+                raise MandateNotFoundError(f"No mandate found with id {mandate_id}.")
+            current = response.data[0]
+        try:
+            return Mandate.model_validate(current)
+        except _UNREADABLE as exc:
+            # Archiving is exactly what should happen to a broken mandate, so
+            # it succeeds; the reply just can't include the unreadable criteria.
+            logger.warning("Archived unreadable mandate %s: %s", mandate_id, _problems(exc))
+            return ArchivedUnreadableMandate(
+                id=mandate_id,
+                organization_id=organization_id,
+                version=current.get("version") or 1,
+                problem=_problems(exc),
+            )
+
+
+def _problems(exc: Exception, limit: int = 3) -> str:
+    """A short, value-free summary of why a stored row didn't validate."""
+    if not isinstance(exc, ValidationError):
+        return type(exc).__name__
+    errors = exc.errors(include_input=False, include_url=False)
+    parts = [f"{'.'.join(str(p) for p in error['loc']) or 'row'}: {error['msg']}" for error in errors[:limit]]
+    if len(errors) > limit:
+        parts.append(f"and {len(errors) - limit} more")
+    return "; ".join(parts)
 
 
 def select_mandate_for_screening(
