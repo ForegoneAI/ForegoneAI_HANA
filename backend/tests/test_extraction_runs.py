@@ -28,7 +28,6 @@ from backend.app.h9n.extraction.run_repository import (
     SupabaseExtractionRunRepository,
 )
 from backend.app.h9n.rag.config import RagSettings
-from backend.app.h9n.review.store import DealStore
 from backend.app.h9n.schemas.base_deal import FieldEvidence
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 from backend.tests.auth_fakes import OTHER_ORGANIZATION_ID, TEST_ORGANIZATION_ID, FakeRunRepository
@@ -98,9 +97,8 @@ def _record(**overrides) -> ExtractionRunRecord:
 
 
 @pytest.fixture
-def repository(tmp_path, monkeypatch, run_repository) -> FakeRunRepository:
-    """The shared fake run store (see conftest.py), plus a throwaway deal store."""
-    monkeypatch.setattr(main, "_review_store", DealStore(tmp_path / "reviews"))
+def repository(run_repository) -> FakeRunRepository:
+    """The shared fake run store (see conftest.py)."""
     return run_repository
 
 
@@ -223,9 +221,7 @@ def test_extract_for_an_organization_the_user_is_not_in_is_refused_before_extrac
     assert repository.runs == []
 
 
-def test_extract_returns_nothing_when_the_run_cannot_be_recorded(tmp_path, monkeypatch):
-    store = DealStore(tmp_path / "reviews")
-    monkeypatch.setattr(main, "_review_store", store)
+def test_extract_returns_nothing_when_the_run_cannot_be_recorded(monkeypatch, deal_repository):
     monkeypatch.setattr(main, "get_extraction_run_repository", lambda: FakeRunRepository(fail=True))
     monkeypatch.setattr(main, "extract_repe_deal", lambda pages: _profile())
 
@@ -233,7 +229,7 @@ def test_extract_returns_nothing_when_the_run_cannot_be_recorded(tmp_path, monke
 
     assert response.status_code == 502
     assert "database unavailable" not in response.text
-    assert store.list_ids() == []
+    assert deal_repository.deals == {}
 
 
 # --- Milestone 1.1: controlled failures and withheld values are recorded ------

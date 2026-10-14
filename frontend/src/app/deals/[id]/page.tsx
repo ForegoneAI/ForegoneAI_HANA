@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/Badge";
 import { Notice } from "@/components/Notice";
 import { RequireSignIn } from "@/components/RequireSignIn";
-import { ApiError, getDeal, type DealProfile } from "@/lib/api";
+import { ApiError, getDeal, type DealProfile, type DealRecord } from "@/lib/api";
 import { dealTitle, reviewStatusBadge } from "@/lib/deals";
 
 const KEY_FIELDS: { field: keyof DealProfile; label: string; format?: (value: number) => string }[] = [
@@ -27,12 +27,12 @@ const KEY_FIELDS: { field: keyof DealProfile; label: string; format?: (value: nu
 function DealWorkspace() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [deal, setDeal] = useState<DealProfile | null>(null);
+  const [record, setRecord] = useState<DealRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getDeal(id)
-      .then(setDeal)
+      .then(setRecord)
       .catch((caught) => {
         if (caught instanceof ApiError && caught.status === 401) {
           router.replace(`/login?next=${encodeURIComponent(`/deals/${id}`)}`);
@@ -52,7 +52,7 @@ function DealWorkspace() {
       </main>
     );
   }
-  if (!deal) {
+  if (!record) {
     return (
       <main className="page">
         <p className="muted">Loading the deal…</p>
@@ -60,6 +60,7 @@ function DealWorkspace() {
     );
   }
 
+  const deal = record.profile;
   const flags = [
     { label: "missing", count: deal.missing_information.length },
     { label: "uncertain", count: deal.uncertain_information.length },
@@ -67,7 +68,7 @@ function DealWorkspace() {
     { label: "withheld", count: deal.withheld_values.length },
   ];
 
-  const status = reviewStatusBadge(deal.review_status);
+  const status = reviewStatusBadge(record.status);
 
   return (
     <main className="page">

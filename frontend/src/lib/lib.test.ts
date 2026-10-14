@@ -74,9 +74,9 @@ describe("safeNextPath", () => {
 
 describe("reviewStatusBadge", () => {
   it("labels each review status for people", () => {
-    expect(reviewStatusBadge("pending")).toEqual({ label: "Needs review", tone: "warn" });
+    expect(reviewStatusBadge("draft")).toEqual({ label: "Draft", tone: "warn" });
+    expect(reviewStatusBadge("reviewed")).toEqual({ label: "Reviewed", tone: "neutral" });
     expect(reviewStatusBadge("approved")).toEqual({ label: "Approved", tone: "ok" });
-    expect(reviewStatusBadge("rejected")).toEqual({ label: "Rejected", tone: "error" });
   });
 });
 

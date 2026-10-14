@@ -6,10 +6,10 @@ export function reviewStatusBadge(status: ReviewStatus): { label: string; tone: 
   switch (status) {
     case "approved":
       return { label: "Approved", tone: "ok" };
-    case "rejected":
-      return { label: "Rejected", tone: "error" };
+    case "reviewed":
+      return { label: "Reviewed", tone: "neutral" };
     default:
-      return { label: "Needs review", tone: "warn" };
+      return { label: "Draft", tone: "warn" };
   }
 }
 

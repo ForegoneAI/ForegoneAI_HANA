@@ -85,12 +85,12 @@ def test_corrected_fields_starts_empty():
     assert deal.corrected_fields == []
 
 
-def test_review_status_starts_pending():
-    # Milestone 1, item 4: a freshly extracted deal hasn't been looked at by
-    # a reviewer yet, so it shouldn't claim to be approved (or rejected).
+def test_review_status_starts_as_a_draft():
+    # Milestone 2.4: a freshly extracted deal hasn't been looked at by a
+    # reviewer yet, so it shouldn't claim to be reviewed or approved.
     deal = REPEDealProfile(deal_name="Test Deal")
 
-    assert deal.review_status == "pending"
+    assert deal.review_status == "draft"
 
 
 def test_review_status_rejects_a_value_that_isnt_one_of_the_three_states():
@@ -100,7 +100,7 @@ def test_review_status_rejects_a_value_that_isnt_one_of_the_three_states():
 
 def test_assignment_is_validated_so_a_bad_correction_is_rejected():
     # BaseDeal sets validate_assignment=True specifically so that a human
-    # reviewer's correction (applied via setattr in DealStore) can't sneak
+    # reviewer's correction (applied via setattr in review/workflow.py) can't sneak
     # a value past the schema the way construction-time validation would
     # normally catch.
     deal = REPEDealProfile(asking_price=1_000_000)

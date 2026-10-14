@@ -11,7 +11,8 @@ export class ApiError extends Error {
   }
 }
 
-export type ReviewStatus = "pending" | "approved" | "rejected";
+/** Where a deal stands in review (M2.4): approved deals are locked until reopened. */
+export type ReviewStatus = "draft" | "reviewed" | "approved";
 
 /** The fields the app currently shows from a REPEDealProfile. */
 export interface DealProfile {
@@ -28,6 +29,25 @@ export interface DealProfile {
   withheld_values: { field_name: string }[];
   review_status: ReviewStatus;
   [field: string]: unknown;
+}
+
+/**
+ * A saved deal from GET /api/h9n/repe/deals/{id} (M2.4): the profile plus
+ * where it stands in review. Any change must send `version` back, so a
+ * change made against an out-of-date copy is refused instead of overwriting
+ * someone else's.
+ */
+export interface DealRecord {
+  deal_id: string;
+  organization_id: string;
+  status: ReviewStatus;
+  version: number;
+  source_filename: string;
+  extraction_run_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  profile: DealProfile;
 }
 
 /** One row of GET /api/h9n/repe/deals. */
@@ -166,8 +186,8 @@ export function listDeals(): Promise<DealSummary[]> {
 }
 
 /** Fetches a saved deal from GET /api/h9n/repe/deals/{id}. */
-export function getDeal(dealId: string): Promise<DealProfile> {
-  return getJson<DealProfile>(`/api/h9n/repe/deals/${encodeURIComponent(dealId)}`);
+export function getDeal(dealId: string): Promise<DealRecord> {
+  return getJson<DealRecord>(`/api/h9n/repe/deals/${encodeURIComponent(dealId)}`);
 }
 
 /** Fetches the signed-in user and their organizations from GET /api/h9n/me. */

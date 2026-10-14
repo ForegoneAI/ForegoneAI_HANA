@@ -33,7 +33,7 @@ Review and Correction: `apply_reviewer_feedback` lets a reviewer describe
 what's wrong with an extracted profile in plain language and have Claude
 re-derive the corrected field(s) from the original document text, rather
 than the reviewer having to work out and submit exact values themselves
-(that manual path still exists too - see `DealStore.apply_corrections`).
+(that manual path still exists too - `PATCH /deals/{id}`, see review/workflow.py).
 Since Milestone 1.1 that path is held to the same standard: the same strict
 validation, the same controlled errors, and the same evidence checks
 (`extraction_output.verify_corrections`) before a correction is applied.
@@ -583,7 +583,7 @@ def extract_repe_deal(
 
 # --- Milestone 1, item 4 (extended) - feedback-driven correction ---------
 #
-# apply_corrections() in review/store.py lets a reviewer push exact values
+# PATCH /deals/{id} (review/workflow.py) lets a reviewer push exact values
 # they've already worked out ("asking_price should be 950000"). The
 # functions below instead let a reviewer just describe what's *wrong*
 # ("the asking price looks off, the OM actually says $950k on page 4") and
@@ -664,7 +664,7 @@ def apply_reviewer_feedback(
     pages:
         The same page-preserved text (from `read_pdf()`) the deal was
         originally extracted from - typically fetched via
-        `DealStore.get_pages()`.
+        the saved deal's `source_pages`.
     deal:
         The deal profile as it stands right now (before this correction).
     feedback:
@@ -725,8 +725,9 @@ def apply_reviewer_feedback(
 
 
 def feedback_updates(deal: REPEDealProfile, result: dict[str, Any]) -> dict[str, Any]:
-    """The single `DealStore.apply_corrections()` update for an
-    `apply_reviewer_feedback()` result, or {} if nothing changes.
+    """The single set of field changes for an `apply_reviewer_feedback()`
+    result, or {} if nothing changes (applied with review.workflow's
+    plan_corrections, source "reviewer_feedback").
 
     Shared by the API (main.py's review endpoint) and the interactive demo,
     so a feedback-driven correction is applied the same way by both:
@@ -734,8 +735,9 @@ def feedback_updates(deal: REPEDealProfile, result: dict[str, Any]) -> dict[str,
     - each corrected field's old citation is replaced by the new, verified
       one, and a field cleared to null loses its citation;
     - any withheld entry for a corrected field is resolved (superseded), and
-      corrections that didn't verify are added as new withheld entries;
-    - the deal goes back to "pending" for a human to look again.
+      corrections that didn't verify are added as new withheld entries.
+    The deal's status isn't changed here: the reject that carried the
+    feedback has already left it in draft for a human to look again.
     """
     corrections: dict[str, Any] = result.get("corrections") or {}
     withheld = [WithheldValue.model_validate(item) for item in result.get("withheld") or []]
@@ -748,5 +750,4 @@ def feedback_updates(deal: REPEDealProfile, result: dict[str, Any]) -> dict[str,
         **corrections,
         "evidence": [entry for entry in deal.evidence if entry.field_name not in changed] + new_evidence,
         "withheld_values": [entry for entry in deal.withheld_values if entry.field_name not in changed] + withheld,
-        "review_status": "pending",
     }

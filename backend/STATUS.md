@@ -49,6 +49,10 @@ the [README](./README.md).
 
 ## 4. Human Review and Correction — ✅ Done
 
+> **Superseded by Milestone 2.4 (2026-10-14):** deals now live in Supabase with a full correction
+> and status history, and statuses are draft / reviewed / approved. The on-disk `DealStore` below
+> was removed. See "Human review and correction" in the [README](./README.md).
+
 Every extracted deal is now saved (`app/h9n/review/store.py`, `DealStore`) and can be fetched or
 corrected later by id:
 

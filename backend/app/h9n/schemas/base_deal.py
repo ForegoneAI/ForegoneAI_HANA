@@ -2,9 +2,9 @@ from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# The three states a reviewer's verdict on a saved deal can be in - see
-# BaseDeal.review_status below.
-ReviewStatus = Literal["pending", "approved", "rejected"]
+# Where a saved deal stands in review (Milestone 2.4) - see
+# BaseDeal.review_status below and backend/app/h9n/review/workflow.py.
+ReviewStatus = Literal["draft", "reviewed", "approved"]
 
 # See FieldEvidence.verification.
 EvidenceVerification = Literal["value_matched", "quote_only"]
@@ -128,8 +128,8 @@ class BaseDeal(BaseModel):
     # (Milestone 1, item 4 - Human Review and Correction).
     corrected_fields: list[str] = Field(default_factory=list)
 
-    # The reviewer's own explanation of what's wrong, submitted alongside a
-    # "rejected" verdict (see review_status below). This is what lets a
+    # The reviewer's own explanation of what's wrong, submitted with a
+    # "reject" review action (Milestone 2.4). This is what lets a
     # reviewer describe the problem in plain language - "the asking price is
     # wrong, it's actually $950k" - instead of having to work out and submit
     # the corrected value themselves. When feedback is given, the extractor
@@ -138,11 +138,10 @@ class BaseDeal(BaseModel):
     # keeps a record of what the reviewer actually said, for the audit trail.
     review_feedback: Optional[str] = None
 
-    # Whether a human reviewer has explicitly signed off on this profile as
-    # correct: "pending" (default) until someone reviews it, then "approved"
-    # once they confirm it's right, or "rejected" if they've looked and it
-    # still isn't - as distinct from corrected_fields, which only tracks
-    # that *a value changed*, not that a reviewer looked at the whole
-    # profile and said "yes, this is right" (Milestone 1, item 4 - the plan's
-    # "Approve and save the validated Deal Profile" step).
-    review_status: ReviewStatus = "pending"
+    # Where the profile stands in review (Milestone 2.4): "draft" (default)
+    # until a reviewer marks it "reviewed", then "approved" once they sign
+    # off on it as the trusted input to screening and underwriting. Any
+    # change to a reviewed profile puts it back to "draft". As distinct from
+    # corrected_fields, which only tracks that *a value changed*. Changed
+    # only through review actions, never directly (see review/workflow.py).
+    review_status: ReviewStatus = "draft"
