@@ -120,7 +120,7 @@ multiply.
 When the request includes an `organization_id` (M1.3), every one of these that happens after the
 PDF is read is recorded as a failed extraction run, with the error type.
 
-**Reviewer-feedback corrections** (`POST /deals/{id}/review` with `rejected` + `feedback`) go
+**Reviewer-feedback corrections** (`POST /deals/{id}/review` with `reject` + `feedback`) go
 through the same machinery: the same strict validation (Claude can change only deal value fields -
 never `review_status`, `withheld_values` or `evidence` directly), retries, time budget and
 evidence checks. A corrected value is applied only if its citation verifies; otherwise it's added
@@ -172,31 +172,49 @@ Values that would have to be **calculated or inferred** (e.g. a cap rate worked 
 asking price when the document never states one) are no longer extracted at all - the field is
 left `null`.
 
-## Human review and correction
+## Human review and correction (Milestone 2.4)
 
-Every extracted deal is saved (`app/h9n/review/store.py`) so it can be looked up and corrected
-later, not just returned once and forgotten. `POST /api/h9n/repe/extract` now returns a `deal_id`
-along with the profile; `GET /api/h9n/repe/deals/{deal_id}` fetches it again, and
-`PATCH /api/h9n/repe/deals/{deal_id}` lets a reviewer submit corrected values for one or more
-fields (see the curl examples above).
+Every extracted deal is saved in Supabase (the `deals` table) with the page text it came from, so
+it can be reopened, corrected and approved later. `POST /api/h9n/repe/extract` returns its
+`deal_id`, and `GET /api/h9n/repe/deals/{deal_id}` returns the deal: its `status`, `version` and
+`profile`.
 
-Every field a reviewer corrects gets added to the profile's own `corrected_fields` list, so the
-JSON itself shows which values are human-verified vs still just what the model extracted -
-without needing a separate audit log to answer that question. Corrections are validated the same
-way a fresh extraction is (wrong type or an unknown field name is rejected, not silently
-accepted).
+**Statuses.** A deal moves `draft` → `reviewed` → `approved`:
 
-Correcting a field's value is a different question from whether a reviewer has actually looked at
-the whole profile and signed off on it, so there's a separate step for that:
-`POST /api/h9n/repe/deals/{deal_id}/review` with `{"status": "approved"}` or
-`{"status": "rejected"}` records the reviewer's explicit verdict in the profile's own
-`review_status` field. Every freshly extracted deal starts out `"pending"` until someone submits
-one of those two.
+- A new extraction is a `draft`.
+- `POST /deals/{id}/review` with an `action`:
+  - `review`: draft → reviewed.
+  - `approve`: draft or reviewed → approved. **An approved deal is locked**: it's the trusted input
+    for screening and underwriting, so corrections are refused (409) until someone reopens it.
+  - `reopen`: reviewed or approved → draft.
+  - `reject`: draft or reviewed → draft, and needs `feedback`, the reviewer's own words about
+    what's wrong. The feedback is saved first; then Claude re-derives the affected field(s) from
+    the deal's source text (see "Extraction reliability" above for the checks a re-derived value
+    must pass).
+- Correcting any field of a `reviewed` deal puts it back to `draft`, since what was reviewed is no
+  longer what's there.
 
-This is intentionally simple - a JSON file per deal on local disk, not a real database - and
-there's no reviewer-facing UI yet, only the API itself. See the caveat at the top of `store.py`
-for what a production version of this would still need (a real database, authentication, a
-who/when audit trail).
+**Corrections.** `PATCH /deals/{id}` sets one or more fields. Values are validated the same way an
+extraction is (a wrong type or an unknown field is a 400). Corrected value fields are listed in
+the profile's `corrected_fields`. A reviewer may also resolve flags, e.g. dismiss a withheld value
+by sending `"withheld_values": []`. They can't rewrite `evidence` or set `review_status`,
+`corrected_fields` or `review_feedback` directly; those only change through review actions.
+
+**Nothing is lost.**
+
+- `GET /deals/{id}/history` returns every corrected field (original value, corrected value, the
+  field's citation at the time, `reviewer` or `reviewer_feedback`, who, when, and which version it
+  produced) and every status change (action, from/to, note, who, when), oldest first. Both are
+  append-only tables (`deal_corrections`, `deal_status_changes`).
+- Every change must send the `version` it was made against. If someone else saved first, it's a
+  **409 "Reload it to see their changes"** instead of a silent overwrite. The database checks the
+  version and writes the change and its history in one transaction (`save_deal_changes()` in the
+  migration).
+
+**Setup:** apply `supabase/migrations/20261014_create_h9n_deals.sql` after the RAG and
+extraction-run migrations. Deals saved by earlier versions as JSON files under
+`backend/data/reviews/` aren't imported; they had no organization owner, so the API already
+refused to serve them.
 
 ## Evaluation: does it actually get things right?
 
@@ -251,7 +269,7 @@ PDF uploaded
     -> read_pdf()            turns it into page-by-page text
     -> extract_repe_deal()   sends that text to Claude, gets back deal info
     -> REPEDealProfile       the same data model used everywhere else in the app
-    -> DealStore.save()      saved by id, so it can be fetched or corrected later
+    -> deals (Supabase)      saved by id as a draft, to be corrected and approved
 ```
 
 ## One-time setup
@@ -353,43 +371,54 @@ curl http://localhost:8000/api/h9n/repe/deals \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Each row has `deal_id`, `deal_name`, `property_name`, `review_status` and `saved_at`. Other
-organizations' deals are never listed.
+Each row has `deal_id`, `organization_id`, `deal_name`, `property_name`, `review_status` (`draft`,
+`reviewed` or `approved`) and `saved_at` (when it last changed). Other organizations' deals are
+never listed.
 
-Fetch that same deal again later by its id:
+Fetch that same deal again later by its id. The response has its `status`, `version` and
+`profile`:
 
 ```bash
-curl http://localhost:8000/api/h9n/repe/deals/b6b6a1e2... \
+curl http://localhost:8000/api/h9n/repe/deals/b6b6a1e2-... \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-And a reviewer can correct one or more fields (see "Human review and correction" below):
+A reviewer corrects one or more fields, sending the `version` they're looking at (see "Human review
+and correction" above):
 
 ```bash
-curl -X PATCH http://localhost:8000/api/h9n/repe/deals/b6b6a1e2... \
+curl -X PATCH http://localhost:8000/api/h9n/repe/deals/b6b6a1e2-... \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"asking_price": 9500000}'
+  -d '{"version": 1, "changes": {"asking_price": 9500000}}'
 ```
 
-Once they're satisfied (or not) with the profile as it stands, they record that verdict separately
-from any individual correction:
+Review actions on the deal as a whole are separate from corrections: `review`, `approve`, `reopen`,
+or `reject` with `feedback`:
 
 ```bash
-curl -X POST http://localhost:8000/api/h9n/repe/deals/b6b6a1e2.../review \
+curl -X POST http://localhost:8000/api/h9n/repe/deals/b6b6a1e2-.../review \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"status": "approved"}'
+  -d '{"action": "approve", "version": 2}'
 ```
 
-`status` only accepts `"approved"` or `"rejected"` - `"pending"` is just the starting state a
-freshly extracted deal has before anyone's reviewed it, not something you submit.
+And the full history of who changed what:
 
-The fetch, correction, and review endpoints all 404 if the id doesn't match a saved deal - or if
-the deal belongs to an organization you're not in, so other organizations' deals can't even be
-confirmed to exist. A correction with an unknown field name or a value of the wrong type gets a
-400 instead of silently corrupting the saved deal, and a review request with anything other than
-`"approved"` or `"rejected"` gets a 422.
+```bash
+curl http://localhost:8000/api/h9n/repe/deals/b6b6a1e2-.../history \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+What the deal endpoints answer when something's wrong:
+
+| Status | When |
+|---|---|
+| 404 | The id doesn't match a saved deal, or the deal belongs to an organization you're not in. Same message either way, so other organizations' deals can't even be confirmed to exist |
+| 400 | A correction with an unknown field, a wrong type, or a field that can only change through review actions; a `reject` without feedback |
+| 409 | The deal changed since your `version`, it's approved (reopen it first), or the action doesn't apply to its status (e.g. approving an approved deal) |
+| 422 | A malformed request, e.g. an unknown `action` |
+| 502/503 | Supabase couldn't be reached or isn't configured. For a `reject`, also when re-deriving the fix failed; the rejection and feedback are still saved, and the message says so |
 
 ### Signing in (Milestone 2.5)
 
@@ -568,7 +597,7 @@ again.
 badge at the top of this file. It fakes the Claude API call (`backend/tests/extraction_fakes.py`), so it needs no
 `ANTHROPIC_API_KEY`, costs nothing, and never touches a real deal document — it's checking that
 the code around the API call is correct (schema building, page-text joining, evidence parsing,
-the review store, the upload/fetch/correct/review endpoints' error handling, the evaluation
+the review rules and deal storage, the upload/fetch/correct/review endpoints' error handling, the evaluation
 suite's scoring logic, and - since Milestone 1.1 - strict output validation, retries, controlled
 errors, and the evidence checks in `test_extraction_reliability.py`), not grading extraction
 quality on a real document.
@@ -584,7 +613,7 @@ This confirmed the code builds a correct description of `REPEDealProfile` to sen
 joins pages into text correctly, correctly turns Claude's answer back into a `REPEDealProfile`
 (including the `evidence` and `uncertain_information` lists), that the upload/fetch/correct/review
 endpoints behave correctly (rejects non-PDF files, 404s on an unknown deal id, 400s on an invalid
-correction, records `corrected_fields`, records an approved/rejected `review_status`), and that
+correction, records each correction and status change, refuses stale versions), and that
 the evaluation suite's field-comparison logic is correct.
 
 It was briefly switched to use OpenAI instead of Claude, then switched back — the version in this
