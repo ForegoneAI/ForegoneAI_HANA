@@ -6,6 +6,7 @@ editing and archiving mandates per organization, selecting one for
 screening, the API routes, and the demo mandate script.
 """
 
+import re
 from uuid import uuid4
 
 import pytest
@@ -508,7 +509,7 @@ def test_the_demo_mandate_only_uses_canonical_values():
 
 
 def test_the_vocabulary_route_lists_the_allowed_values(api_client):
-    response = api_client.get("/api/h9n/mandates/vocabulary")
+    response = api_client.get("/api/h9n/mandates/vocabulary", headers=HEADERS)
     assert response.status_code == 200
     assert response.json() == {"asset_types": ASSET_TYPES, "markets": MARKETS}
 
@@ -813,3 +814,159 @@ def test_the_demo_script_exits_cleanly_when_the_demo_already_exists(capsys, monk
 
     assert script.main(["--organization-id", str(organization_id)]) == 0
     assert "already exists" in capsys.readouterr().out
+
+
+# --- Third review round ------------------------------------------------------------
+
+from backend.app.h9n.screening.vocabulary import (  # noqa: E402
+    MarketMatch,
+    canonical_asset_type,
+    canonical_market,
+    match_market,
+    profile_market_match,
+)
+
+
+@pytest.mark.parametrize(
+    "criteria, unknown",
+    [
+        ({"asset_types": ["Office and Retail"]}, "Office and Retail"),
+        ({"asset_types": ["Office/Retail"]}, "Office/Retail"),
+        ({"target_markets": ["Dallas and Houston", "Austin"]}, "Dallas and Houston"),
+        ({"target_markets": ["Austin or San Antonio"]}, "Austin or San Antonio"),
+        ({"excluded_markets": ["Uptown Dallas"]}, "Uptown Dallas"),
+        ({"target_markets": ["Portland, ME"]}, "Portland, ME"),
+    ],
+)
+def test_mandate_entries_that_name_more_or_less_than_one_value_are_rejected_not_trimmed(criteria, unknown):
+    with pytest.raises(ValidationError, match=re.escape(repr(unknown))):
+        MandateCriteria(**criteria)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Multifamily", "Multifamily"),
+        ("apartments", "Multifamily"),
+        ("Self Storage", "Self-Storage"),
+        ("Office and Retail", None),
+        ("Garden-style apartment community", None),  # deal wording, not a mandate entry
+    ],
+)
+def test_strict_property_type_for_mandate_input(text, expected):
+    assert canonical_asset_type(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Dallas-Fort Worth", "Dallas-Fort Worth"),
+        ("DFW", "Dallas-Fort Worth"),
+        ("Dallas, TX", "Dallas-Fort Worth"),
+        ("Franklin, Tennessee", "Nashville"),
+        ("Arlington, VA", "Washington, D.C."),
+        ("Arlington, TX", "Dallas-Fort Worth"),
+        ("Columbia, MD", "Baltimore"),
+        ("Dallas, CA", None),
+        ("Dallas and Houston", None),
+        ("Uptown Dallas", None),
+        ("123 Main St, Plano, TX", None),  # an address is deal data, not a mandate entry
+    ],
+)
+def test_strict_market_for_mandate_input(text, expected):
+    assert canonical_market(text) == expected
+
+
+def test_a_mandate_saves_every_entry_it_was_given():
+    criteria = MandateCriteria(
+        asset_types=["Office", "Retail"], target_markets=["Dallas, TX", "Houston", "Austin", "San Antonio"]
+    )
+    assert criteria.asset_types == ["Office", "Retail"]
+    assert criteria.target_markets == ["Dallas-Fort Worth", "Houston", "Austin", "San Antonio"]
+
+
+# A table of real-looking deal-data strings, pinning down what loose matching
+# does - including the cases that are only "partial" (needs review) or
+# deliberately "unknown".
+DEAL_MARKET_CASES = [
+    ("Dallas-Fort Worth-Arlington, TX MSA", "Dallas-Fort Worth", "exact"),
+    ("4100 Elm St, Plano, TX 75024", "Dallas-Fort Worth", "exact"),
+    ("Dallas TX 75201", "Dallas-Fort Worth", "exact"),
+    ("Arlington, VA", "Washington, D.C.", "exact"),
+    ("Arlington, TX", "Dallas-Fort Worth", "exact"),
+    ("Columbia, MD", "Baltimore", "exact"),
+    ("Washington-Arlington-Alexandria, DC-VA-MD-WV", "Washington, D.C.", "exact"),
+    ("Uptown Dallas", "Dallas-Fort Worth", "partial"),
+    ("Brooklyn Park", "New York", "partial"),  # a Minneapolis suburb: flagged, not trusted
+    ("DC Ranch", None, None),  # Scottsdale neighborhood: abbreviations aren't searched inside text
+    ("St. Petersburg, Russia", None, None),
+    ("Portland, ME", None, None),
+    ("Buffalo, New York", None, None),
+    ("Springfield, IL", None, None),
+]
+
+
+@pytest.mark.parametrize("text, market, confidence", DEAL_MARKET_CASES)
+def test_deal_data_market_matching_table(text, market, confidence):
+    match = match_market(text)
+    assert (match.market if match else None) == market
+    assert (match.confidence if match else None) == confidence
+
+
+DEAL_TYPE_CASES = [
+    ("Garden-style apartment community", "Multifamily"),
+    ("Land O Lakes Apartments", "Multifamily"),  # bare "land" only counts when nothing else matches
+    ("Land", "Land"),
+    ("Vacant land", "Land"),
+    ("Hotel conversion to apartments", "Hospitality"),  # intentional: today's use comes first
+    ("Office building with ground-floor retail", "Office"),
+    ("Multifamily development site", "Land"),
+]
+
+
+@pytest.mark.parametrize("text, expected", DEAL_TYPE_CASES)
+def test_deal_data_property_type_table(text, expected):
+    assert normalize_asset_type(text) == expected
+
+
+def test_a_profile_market_says_which_field_it_came_from_and_prefers_exact_matches():
+    profile = REPEDealProfile(market="Uptown Dallas", address="500 Main St, Austin, TX 78701")
+    assert profile_market_match(profile) == MarketMatch("Austin", "exact", "austin", "address")
+
+    only_partial = REPEDealProfile(market="Uptown Dallas")
+    match = profile_market_match(only_partial)
+    assert match.market == "Dallas-Fort Worth" and match.confidence == "partial" and match.field == "market"
+    assert profile_market_match(REPEDealProfile(market="Springfield, IL")) is None
+
+
+def test_a_real_code_bug_while_reading_is_not_hidden_as_bad_data(monkeypatch):
+    repository = _repository()
+    organization_id = uuid4()
+    repository.create(organization_id, DEMO_MANDATE)
+
+    def broken(row):
+        raise TypeError("a bug, not bad data")
+
+    monkeypatch.setattr(Mandate, "model_validate", staticmethod(broken))
+    with pytest.raises(TypeError):
+        repository.list(organization_id)
+
+
+def test_the_list_says_how_many_mandates_it_left_out(api_client, monkeypatch):
+    repository, organization_id, good, _ = _save_two_and_break_one(api_client.fake, ORG)
+    monkeypatch.setattr(mandate_api, "get_mandate_repository", lambda: repository)
+
+    listed = api_client.get("/api/h9n/mandates", params={"organization_id": str(organization_id)}, headers=HEADERS)
+    assert listed.status_code == 200
+    assert listed.headers[mandate_api.SKIPPED_HEADER] == "1"
+    assert repository.list_with_skipped(organization_id) == ([good], 1)
+
+
+def test_the_list_has_no_skipped_header_when_nothing_was_left_out(api_client):
+    url, params = _url()
+    api_client.post(url, params=params, headers=HEADERS, json=DEMO_MANDATE.model_dump(mode="json"))
+    assert mandate_api.SKIPPED_HEADER not in api_client.get(url, params=params, headers=HEADERS).headers
+
+
+def test_the_vocabulary_route_needs_the_same_access_as_the_others(api_client):
+    assert api_client.get("/api/h9n/mandates/vocabulary").status_code == 401

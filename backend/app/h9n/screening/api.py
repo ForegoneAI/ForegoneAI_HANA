@@ -8,12 +8,15 @@
     GET  /api/h9n/mandates/{id}/for-screening   select one for a screening
     GET  /api/h9n/mandates/vocabulary           the allowed property types and markets
 
-Every route acts for one organization, given as `?organization_id=...`.
+Every route except /vocabulary acts for one organization, given as
+`?organization_id=...`. The list sets an X-H9N-Skipped-Mandates header when
+some saved mandates couldn't be read, so a UI can say so.
 
-Access: until customer sign-in lands (M2.5, PR #6), these routes use the same
-internal operator key as the RAG and run-recording routes (X-H9N-API-Key).
-That check lives only in `_organization_for_request` below, so switching to
-signed-in users is a one-function change.
+Access: until customer sign-in lands (M2.5, PR #6), every route - including
+/vocabulary, for consistency - needs the same internal operator key as the
+RAG and run-recording routes (X-H9N-API-Key). That check lives only in
+`_caller_has_access` below, so switching to signed-in users is a
+one-function change.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from functools import lru_cache
 from typing import Callable, TypeVar
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from backend.app.h9n.rag.api import require_internal_rag_access
 from backend.app.h9n.rag.config import RagConfigurationError, get_rag_settings
@@ -54,12 +57,18 @@ def get_mandate_repository() -> MandateRepository:
     return SupabaseMandateRepository(get_rag_settings())
 
 
+def _caller_has_access(
+    x_h9n_api_key: str | None = Header(default=None, alias="X-H9N-API-Key"),
+) -> None:
+    """The only place access is checked."""
+    require_internal_rag_access(x_h9n_api_key)
+
+
 def _organization_for_request(
     organization_id: UUID = Query(..., description="The organization whose mandates to use."),
-    x_h9n_api_key: str | None = Header(default=None, alias="X-H9N-API-Key"),
+    _: None = Depends(_caller_has_access),
 ) -> UUID:
-    """The organization a request acts for. The only place access is checked."""
-    require_internal_rag_access(x_h9n_api_key)
+    """The organization a request acts for."""
     return organization_id
 
 
@@ -85,19 +94,28 @@ def _call(action: Callable[[MandateRepository], T]) -> T:
         raise HTTPException(status_code=502, detail="Mandates could not be reached. Try again shortly.") from exc
 
 
+SKIPPED_HEADER = "X-H9N-Skipped-Mandates"
+
+
 @router.get("", response_model=list[Mandate])
 def list_mandates(
+    response: Response,
     include_archived: bool = False,
     organization_id: UUID = Depends(_organization_for_request),
 ) -> list[Mandate]:
-    return _call(lambda repository: repository.list(organization_id, include_archived=include_archived))
+    mandates, skipped = _call(
+        lambda repository: repository.list_with_skipped(organization_id, include_archived=include_archived)
+    )
+    if skipped:
+        response.headers[SKIPPED_HEADER] = str(skipped)
+    return mandates
 
 
-@router.get("/vocabulary")
+@router.get("/vocabulary", dependencies=[Depends(_caller_has_access)])
 def mandate_vocabulary() -> dict[str, list[str]]:
     """The property types and markets a mandate may use (for a UI's pickers).
     The same fixed lists for every organization, so no organization is needed.
-    Common wording ("Apartments", "DFW") is also accepted and saved as these."""
+    Exact aliases ("Apartments", "DFW") are also accepted and saved as these."""
     return {"asset_types": ASSET_TYPES, "markets": MARKETS}
 
 

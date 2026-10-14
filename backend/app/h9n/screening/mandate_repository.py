@@ -21,10 +21,10 @@ from backend.app.h9n.screening.mandate import Mandate, MandateInput, MandateUpda
 
 logger = logging.getLogger(__name__)
 
-# What a stored row that no longer fits the form can raise when read. Besides
-# validation errors, a hand-edited number too large for Python to compare
-# raises OverflowError.
-_UNREADABLE = (ValidationError, ValueError, TypeError, OverflowError)
+# What a stored row that no longer fits the form can raise when read: a
+# validation error, or OverflowError for a hand-edited number too large for
+# Python to compare. Anything else is a real bug and is left to surface.
+_UNREADABLE = (ValidationError, OverflowError)
 
 TABLE = "investment_mandates"
 
@@ -75,6 +75,10 @@ class MandateRepository(Protocol):
 
     def list(self, organization_id: UUID, *, include_archived: bool = False) -> list[Mandate]: ...
 
+    def list_with_skipped(
+        self, organization_id: UUID, *, include_archived: bool = False
+    ) -> tuple[list[Mandate], int]: ...
+
     def get(self, organization_id: UUID, mandate_id: UUID) -> Mandate: ...
 
     def create(self, organization_id: UUID, mandate: MandateInput) -> Mandate: ...
@@ -112,24 +116,33 @@ class SupabaseMandateRepository:
         self._client = client or create_client(settings.supabase_url, settings.supabase_service_role_key)
 
     def list(self, organization_id: UUID, *, include_archived: bool = False) -> list[Mandate]:
-        """The organization's mandates. A row that can't be read is left out
-        (and logged) so one bad row never hides all the others."""
+        """The organization's readable mandates (see list_with_skipped)."""
+        return self.list_with_skipped(organization_id, include_archived=include_archived)[0]
+
+    def list_with_skipped(
+        self, organization_id: UUID, *, include_archived: bool = False
+    ) -> tuple[list[Mandate], int]:
+        """(the organization's mandates, how many unreadable ones were left
+        out). An unreadable row is skipped and logged, so one bad row never
+        hides all the others; the count lets a UI say that some are missing."""
         query = self._client.table(TABLE).select("*").eq("organization_id", str(organization_id))
         if not include_archived:
             query = query.eq("is_archived", False)
         response = query.order("name").execute()
         mandates = []
+        skipped = 0
         for row in response.data or []:
             try:
                 mandates.append(Mandate.model_validate(row))
             except _UNREADABLE as exc:
+                skipped += 1
                 logger.error(
                     "Skipping unreadable mandate %s (organization %s): %s",
                     row.get("id"),
                     organization_id,
                     _problems(exc),
                 )
-        return mandates
+        return mandates, skipped
 
     def get(self, organization_id: UUID, mandate_id: UUID) -> Mandate:
         row = self._fetch_row(organization_id, mandate_id)

@@ -18,9 +18,10 @@ mandate with an approved Deal Profile without any guesswork:
     leverage.max_ltv     -> ltv
     leverage.max_interest_rate -> interest_rate
 
-Property types and markets must come from the fixed lists in vocabulary.py
-(common wording like "Apartments" or "DFW" is accepted and saved as the
-canonical name), so they can be matched with a Deal Profile's own wording.
+Property types and markets must come from the fixed lists in vocabulary.py.
+A canonical name or an exact alias ("Apartments", "DFW", "Dallas, TX") is
+accepted and saved as the canonical name; anything else, including "Office
+and Retail", is rejected rather than partly kept.
 
 Units follow the Deal Profile: money in US dollars, percentages as their
 numeric value (6.5 means 6.5%, never 0.065). Unit counts and years are whole
@@ -40,7 +41,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
-from backend.app.h9n.screening.vocabulary import ASSET_TYPES, MARKETS, normalize_asset_type, normalize_market
+from backend.app.h9n.screening.vocabulary import ASSET_TYPES, MARKETS, canonical_asset_type, canonical_market
 
 # The shape of the stored `criteria` JSON. Bump it (and teach the reader to
 # upgrade older rows) whenever a change would make old rows invalid, so old
@@ -239,12 +240,12 @@ class MandateCriteria(BaseModel):
     @field_validator("asset_types")
     @classmethod
     def _known_asset_types(cls, values: list[str]) -> list[str]:
-        return _canonical_list(values, normalize_asset_type, "property types", ASSET_TYPES)
+        return _canonical_list(values, canonical_asset_type, "property types", ASSET_TYPES)
 
     @field_validator("target_markets", "excluded_markets")
     @classmethod
     def _known_markets(cls, values: list[str]) -> list[str]:
-        return _canonical_list(values, normalize_market, "markets", MARKETS)
+        return _canonical_list(values, canonical_market, "markets", MARKETS)
 
     @field_validator("deal_size")
     @classmethod

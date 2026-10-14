@@ -418,15 +418,26 @@ limit above a trillion, a market both targeted and excluded, an unknown market) 
 422 and never saved.
 
 **Property types and markets come from fixed lists** (`app/h9n/screening/vocabulary.py`; also
-`GET /api/h9n/mandates/vocabulary`). The extractor keeps a document's own wording, so the same
-lists are used on both sides: common wording is accepted and saved as the canonical name
-("Apartments" -> `Multifamily`, "DFW" -> `Dallas-Fort Worth`), and M3.2 should read a profile with
-`profile_asset_type()` / `profile_market()`, which turn "Garden-style apartment community" or
-"12 Elm St, Plano, TX" into the same names. Unrecognized wording becomes "unknown", never a guess:
-a city in a different state or country is never matched ("Portland, ME", "Buffalo, New York",
-"Birmingham, UK"), and for property types the main noun wins ("Office building with ground-floor
-retail" is `Office`; "Multifamily development site" is `Land`). To support a new type or market,
-add it and its aliases to `vocabulary.py`; an alias listed for two markets fails at startup.
+`GET /api/h9n/mandates/vocabulary`), read at two levels of strictness:
+
+- **Mandate entries are strict.** Only a canonical name or an exact alias is accepted ("Apartments"
+  -> `Multifamily`, "DFW" or "Dallas, TX" -> `Dallas-Fort Worth`). Anything else - including
+  "Office and Retail" or "Dallas and Houston" - is a 422 naming the entry, so a criterion is never
+  silently dropped.
+- **Deal data is read loosely.** `profile_asset_type()` and `profile_market_match()` find the type or
+  market inside longer wording ("Garden-style apartment community", "12 Elm St, Plano, TX").
+  `profile_market_match()` also says which field the market came from and how sure it is:
+  `"exact"`, or `"partial"` when it was only found as a word inside a longer name ("Uptown Dallas",
+  "Brooklyn Park"). **M3.2 should show the matched market and field to the reviewer, and treat a
+  partial match or an unknown market as "needs review", not as a pass or fail.**
+
+Wording it can't place confidently is unknown, never a guess: a city in another state or country
+("Portland, ME", "Buffalo, New York", "St. Petersburg, Russia"), or an abbreviation inside a longer
+name ("DC Ranch"). For property types the main noun wins ("Office building with ground-floor retail"
+is `Office`), and a bare "land" only counts when nothing else matches. To add a market, add one line
+(its states and aliases) to `_MARKETS`; an alias listed for two markets fails at startup. Renaming or
+removing a canonical name makes saved mandates that use it unreadable, so pair that with a
+`CRITERIA_SCHEMA_VERSION` bump and a migration.
 
 Routes (internal API key and `?organization_id=` required, like run recording above):
 
@@ -458,7 +469,9 @@ Things that aren't obvious:
   quietly erase data.
 - **A broken saved mandate doesn't break the rest.** Rows are checked when read. One that no
   longer fits the form (edited by hand, or an old format) is left out of lists and logged;
-  fetching it directly returns a 500 naming the mandate and the problem. It can still be fixed
+  fetching it directly returns a 500 naming the mandate and the problem. The list response's
+  `X-H9N-Skipped-Mandates` header says how many were left out, so a UI can show it. (Only data
+  problems are skipped; a genuine code error still surfaces as an error.) It can still be fixed
   with a PUT, or archived (the archive reply then carries `problem` instead of the criteria). The stored `criteria` carry a `schema_version`: bump it (and upgrade
   old rows) whenever a change would make existing rows invalid.
 - **Archive, don't delete.** Archived mandates disappear from the list and can't be edited or
@@ -473,7 +486,8 @@ Things that aren't obvious:
   including `viewer`s. Restricting edits to admins needs the member's role from sign-in (M2.5).
 - **Security - before customers use this:** until sign-in (M2.5) lands, anyone with the shared
   internal API key can pass any `organization_id` and read or edit that organization's mandates.
-  Access is checked in one place (`_organization_for_request` in `app/h9n/screening/api.py`), and
+  Every mandate route, `/vocabulary` included, needs that key. Access is checked in one place
+  (`_caller_has_access` in `app/h9n/screening/api.py`), and
   switching it to the signed-in user's organizations is part of the M2.5 work, not a separate task.
 
 ## Settings

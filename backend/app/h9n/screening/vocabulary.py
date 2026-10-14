@@ -2,37 +2,48 @@
 vocabulary.py
 
 H9N Milestone 3.1 - the fixed lists of property types and markets a mandate
-may use, plus the alias maps that turn free-text wording into them.
+may use, and the rules that turn wording into them.
 
-Why this exists: the extractor (M1.1) never rewrites a document's wording, so
-a Deal Profile says "garden-style apartment community" or "Dallas, TX", while
-a mandate says "Multifamily" or "Dallas-Fort Worth". Mandates are therefore
-saved only with the canonical names below, and the same functions are used to
-read a Deal Profile's wording (M3.2), so both sides meet on one value:
+The extractor (M1.1) never rewrites a document's wording, so a Deal Profile
+says "garden-style apartment community" or "Dallas, TX" while a mandate says
+"Multifamily" or "Dallas-Fort Worth". Both sides are brought to the same
+canonical names here, with two deliberately different levels of strictness:
 
-    normalize_asset_type("Garden-style apartment community")  -> "Multifamily"
-    normalize_market("Dallas-Fort Worth-Arlington, TX MSA")  -> "Dallas-Fort Worth"
-    normalize_market("123 Main St, Plano, TX 75024")          -> "Dallas-Fort Worth"
+  * Mandate input (what a person types) is matched STRICTLY:
+    canonical_asset_type() / canonical_market() accept only a canonical name
+    or an exact alias ("Apartments", "DFW", "Dallas, TX"). Anything else -
+    including "Office and Retail" or "Dallas and Houston" - is rejected, so a
+    criterion is never silently dropped or merged.
 
-Anything not recognized returns None ("unknown"), never a guess. To support a
-new type or market, add it (and its aliases) here; GET
-/api/h9n/mandates/vocabulary lists the current values for a UI.
+  * Deal data (what a document says) is read LOOSELY: normalize_asset_type()
+    and match_market() find the type or market inside longer text ("12 Elm
+    St, Plano, TX 75024"). A market found only from a word inside the text
+    ("Uptown Dallas") is marked confidence="partial" so screening (M3.2) can
+    ask a reviewer to confirm it instead of passing or failing on it.
+
+Unrecognized wording is None ("unknown"), never a guess. To add a market,
+add one line to _MARKETS (its states and aliases together); to add a type,
+add its phrases to the matching tier. Removing or renaming a canonical name
+makes saved mandates that use it unreadable: pair that with a
+CRITERIA_SCHEMA_VERSION bump and a migration (see mandate.py).
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any, Literal, Optional
 
 # --- Property types ---------------------------------------------------------
+#
+# Read in three tiers (deal data only):
+#   1. _SPECIFIC_TYPE_PHRASES win whenever they appear, because they qualify a
+#      general word ("student apartments", "multifamily development site").
+#   2. _GENERAL_TYPE_PHRASES: the one mentioned FIRST wins - the main noun -
+#      so "Office building with ground-floor retail" is Office.
+#   3. A bare "land" counts only if nothing else matched, so "Land O Lakes
+#      Apartments" is Multifamily but "Land" alone is Land.
 
-# Canonical type -> phrases that mean it. Two tiers:
-#   _SPECIFIC_TYPE_PHRASES win whenever they appear, because they qualify a
-#   general word ("student apartments" is Student Housing, "multifamily
-#   development site" is Land, "medical office" is Medical Office);
-#   _GENERAL_TYPE_PHRASES are otherwise read by which is mentioned FIRST - the
-#   main noun - so "Office building with ground-floor retail" is Office and
-#   "apartment community with retail" is Multifamily.
 _SPECIFIC_TYPE_PHRASES: dict[str, tuple[str, ...]] = {
     "Senior Housing": (
         "senior housing",
@@ -71,10 +82,9 @@ _SPECIFIC_TYPE_PHRASES: dict[str, tuple[str, ...]] = {
         "land site",
         "vacant lot",
     ),
-    "Cold Storage": ("cold storage",),  # resolved to Industrial below
-    "Flex Office": ("flex office",),  # resolved to Office below
+    "Industrial": ("cold storage",),  # not Self-Storage
+    "Office": ("flex office",),  # not Industrial
 }
-_SPECIFIC_RESOLVES_TO = {"Cold Storage": "Industrial", "Flex Office": "Office"}
 
 _GENERAL_TYPE_PHRASES: dict[str, tuple[str, ...]] = {
     "Multifamily": (
@@ -99,111 +109,107 @@ _GENERAL_TYPE_PHRASES: dict[str, tuple[str, ...]] = {
     ),
     "Self-Storage": ("self storage", "mini storage", "storage facility", "storage units"),
     "Hospitality": ("hospitality", "hotel", "motel", "lodging", "resort"),
-    "Land": ("land",),
 }
 
-_ASSET_TYPE_PHRASES: dict[str, tuple[str, ...]] = {}
-for _tier in (_SPECIFIC_TYPE_PHRASES, _GENERAL_TYPE_PHRASES):
-    for _name, _phrases in _tier.items():
-        _canonical = _SPECIFIC_RESOLVES_TO.get(_name, _name)
-        _ASSET_TYPE_PHRASES[_canonical] = _ASSET_TYPE_PHRASES.get(_canonical, ()) + _phrases
+_FALLBACK_TYPE_PHRASES: dict[str, tuple[str, ...]] = {"Land": ("land",)}
 
-ASSET_TYPES: list[str] = sorted(_ASSET_TYPE_PHRASES)
+_TIERS = (_SPECIFIC_TYPE_PHRASES, _GENERAL_TYPE_PHRASES, _FALLBACK_TYPE_PHRASES)
+
+ASSET_TYPES: list[str] = sorted({name for tier in _TIERS for name in tier})
 
 # --- Markets ----------------------------------------------------------------
+#
+# Canonical market -> (the states it spans, other names for it). City names
+# shared by several metros (Arlington, Aurora, Columbia, ...) are only listed
+# with their state ("arlington tx"), never bare. When a location names a
+# state, a market in a different state is never matched ("Portland, ME").
 
-# Canonical metro -> other names, main cities and abbreviations. City names
-# shared by several metros (Arlington, Glendale, Columbia, Aurora, ...) are
-# only listed with their state ("aurora co"), never bare.
-_MARKET_ALIASES: dict[str, tuple[str, ...]] = {
-    "Atlanta": ("atlanta", "marietta", "alpharetta", "sandy springs", "decatur"),
-    "Austin": ("austin", "round rock", "san marcos", "georgetown tx"),
-    "Baltimore": ("baltimore",),
-    "Birmingham": ("birmingham al", "birmingham alabama"),
-    "Boise": ("boise", "meridian id"),
-    "Boston": ("boston", "cambridge ma", "somerville"),
-    "Charleston": ("charleston sc", "charleston south carolina", "north charleston"),
-    "Charlotte": ("charlotte",),
-    "Chicago": ("chicago", "chicagoland", "evanston", "naperville"),
-    "Cincinnati": ("cincinnati",),
-    "Cleveland": ("cleveland",),
-    "Columbus": ("columbus oh", "columbus ohio"),
-    "Dallas-Fort Worth": ("dallas", "fort worth", "ft worth", "dfw", "plano", "irving", "frisco", "mckinney"),
-    "Denver": ("denver", "aurora co", "lakewood co", "boulder"),
-    "Detroit": ("detroit",),
-    "Greenville": ("greenville sc", "greenville spartanburg", "spartanburg"),
-    "Houston": ("houston", "the woodlands", "sugar land", "katy", "pearland"),
-    "Indianapolis": ("indianapolis", "carmel in"),
-    "Jacksonville": ("jacksonville",),
-    "Kansas City": ("kansas city", "overland park"),
-    "Las Vegas": ("las vegas", "henderson nv", "north las vegas"),
-    "Los Angeles": ("los angeles", "long beach", "pasadena", "orange county", "irvine", "anaheim"),
-    "Louisville": ("louisville",),
-    "Memphis": ("memphis",),
-    "Miami": ("miami", "south florida", "fort lauderdale", "ft lauderdale", "west palm beach", "boca raton"),
-    "Minneapolis-St. Paul": ("minneapolis", "st paul", "saint paul", "twin cities"),
-    "Nashville": ("nashville", "franklin tn", "murfreesboro"),
-    "New Orleans": ("new orleans",),
-    "New York": ("new york", "new york city", "nyc", "manhattan", "brooklyn", "queens", "bronx", "jersey city"),
-    "Oklahoma City": ("oklahoma city", "okc"),
-    "Orlando": ("orlando", "kissimmee"),
-    "Philadelphia": ("philadelphia", "philly"),
-    "Phoenix": ("phoenix", "scottsdale", "tempe", "mesa", "chandler", "gilbert"),
-    "Pittsburgh": ("pittsburgh",),
-    "Portland": ("portland or", "portland oregon", "beaverton"),
-    "Raleigh-Durham": ("raleigh", "durham", "chapel hill", "research triangle", "cary nc"),
-    "Richmond": ("richmond va", "richmond virginia"),
-    "Sacramento": ("sacramento",),
-    "Salt Lake City": ("salt lake city", "slc", "provo", "ogden"),
-    "San Antonio": ("san antonio", "new braunfels"),
-    "San Diego": ("san diego",),
+_MARKETS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "Atlanta": ("ga", ("atlanta", "marietta", "alpharetta", "sandy springs", "decatur")),
+    "Austin": ("tx", ("austin", "round rock", "san marcos", "georgetown tx")),
+    "Baltimore": ("md", ("baltimore", "columbia md", "towson")),
+    "Birmingham": ("al", ("birmingham al", "birmingham alabama")),
+    "Boise": ("id", ("boise", "meridian id")),
+    "Boston": ("ma nh", ("boston", "cambridge ma", "somerville")),
+    "Charleston": ("sc", ("charleston sc", "charleston south carolina", "north charleston")),
+    "Charlotte": ("nc sc", ("charlotte",)),
+    "Chicago": ("il in", ("chicago", "chicagoland", "evanston", "naperville")),
+    "Cincinnati": ("in ky oh", ("cincinnati",)),
+    "Cleveland": ("oh", ("cleveland",)),
+    "Columbus": ("oh", ("columbus oh", "columbus ohio")),
+    "Dallas-Fort Worth": (
+        "tx",
+        ("dallas", "fort worth", "ft worth", "dfw", "plano", "irving", "frisco", "mckinney", "arlington tx"),
+    ),
+    "Denver": ("co", ("denver", "aurora co", "lakewood co", "boulder")),
+    "Detroit": ("mi", ("detroit",)),
+    "Greenville": ("sc", ("greenville sc", "greenville spartanburg", "spartanburg")),
+    "Houston": ("tx", ("houston", "the woodlands", "sugar land", "katy", "pearland")),
+    "Indianapolis": ("in", ("indianapolis", "carmel in")),
+    "Jacksonville": ("fl", ("jacksonville",)),
+    "Kansas City": ("ks mo", ("kansas city", "overland park")),
+    "Las Vegas": ("nv", ("las vegas", "henderson nv", "north las vegas")),
+    "Los Angeles": ("ca", ("los angeles", "long beach", "pasadena", "orange county", "irvine", "anaheim")),
+    "Louisville": ("in ky", ("louisville",)),
+    "Memphis": ("ar ms tn", ("memphis",)),
+    "Miami": (
+        "fl",
+        ("miami", "south florida", "fort lauderdale", "ft lauderdale", "west palm beach", "boca raton"),
+    ),
+    "Minneapolis-St. Paul": ("mn wi", ("minneapolis", "st paul", "saint paul", "twin cities")),
+    "Nashville": ("tn", ("nashville", "franklin tn", "murfreesboro")),
+    "New Orleans": ("la", ("new orleans",)),
+    "New York": (
+        "ct nj ny pa",
+        ("new york", "new york city", "nyc", "manhattan", "brooklyn", "queens", "bronx", "jersey city"),
+    ),
+    "Oklahoma City": ("ok", ("oklahoma city", "okc")),
+    "Orlando": ("fl", ("orlando", "kissimmee")),
+    "Philadelphia": ("de md nj pa", ("philadelphia", "philly")),
+    "Phoenix": ("az", ("phoenix", "scottsdale", "tempe", "mesa", "chandler", "gilbert")),
+    "Pittsburgh": ("pa", ("pittsburgh",)),
+    "Portland": ("or wa", ("portland or", "portland oregon", "beaverton")),
+    "Raleigh-Durham": ("nc", ("raleigh", "durham", "chapel hill", "research triangle", "cary nc")),
+    "Richmond": ("va", ("richmond va", "richmond virginia")),
+    "Sacramento": ("ca", ("sacramento",)),
+    "Salt Lake City": ("ut", ("salt lake city", "slc", "provo", "ogden")),
+    "San Antonio": ("tx", ("san antonio", "new braunfels")),
+    "San Diego": ("ca", ("san diego",)),
     "San Francisco Bay Area": (
-        "san francisco",
-        "sf bay area",
-        "bay area",
-        "san francisco bay area",
-        "oakland",
-        "san jose",
-        "silicon valley",
+        "ca",
+        (
+            "san francisco",
+            "sf bay area",
+            "bay area",
+            "san francisco bay area",
+            "oakland",
+            "san jose",
+            "silicon valley",
+        ),
     ),
-    "Savannah": ("savannah",),
-    "Seattle": ("seattle", "bellevue wa", "tacoma", "puget sound"),
-    "St. Louis": ("st louis", "saint louis"),
-    "Tampa": ("tampa", "tampa bay", "st petersburg", "saint petersburg", "clearwater"),
-    "Tucson": ("tucson",),
+    "Savannah": ("ga", ("savannah",)),
+    "Seattle": ("wa", ("seattle", "bellevue wa", "tacoma", "puget sound")),
+    "St. Louis": ("il mo", ("st louis", "saint louis")),
+    "Tampa": ("fl", ("tampa", "tampa bay", "st petersburg", "saint petersburg", "clearwater")),
+    "Tucson": ("az", ("tucson",)),
     "Washington, D.C.": (
-        "washington dc",
-        "washington d c",
-        "washington arlington alexandria",
-        "dc",
-        "district of columbia",
-        "northern virginia",
-        "nova",
-        "dmv",
+        "dc md va wv",
+        (
+            "washington dc",
+            "washington d c",
+            "washington arlington alexandria",
+            "dc",
+            "district of columbia",
+            "northern virginia",
+            "nova",
+            "dmv",
+            "arlington va",
+            "alexandria va",
+        ),
     ),
 }
 
-MARKETS: list[str] = sorted(_MARKET_ALIASES)
-
-# The states each market is in. When a location names a state, a market in a
-# different state is never matched: "Portland, ME" is not Portland (OR), and
-# "Charleston, WV" is not Charleston (SC).
-_MARKET_STATES: dict[str, frozenset[str]] = {
-    market: frozenset(states.split())
-    for market, states in {
-        "Atlanta": "ga", "Austin": "tx", "Baltimore": "md", "Birmingham": "al", "Boise": "id",
-        "Boston": "ma nh", "Charleston": "sc", "Charlotte": "nc sc", "Chicago": "il in", "Cincinnati": "oh ky in",
-        "Cleveland": "oh", "Columbus": "oh", "Dallas-Fort Worth": "tx", "Denver": "co", "Detroit": "mi",
-        "Greenville": "sc", "Houston": "tx", "Indianapolis": "in", "Jacksonville": "fl", "Kansas City": "mo ks",
-        "Las Vegas": "nv", "Los Angeles": "ca", "Louisville": "ky in", "Memphis": "tn ms ar", "Miami": "fl",
-        "Minneapolis-St. Paul": "mn wi", "Nashville": "tn", "New Orleans": "la", "New York": "ny nj ct pa",
-        "Oklahoma City": "ok", "Orlando": "fl", "Philadelphia": "pa nj de md", "Phoenix": "az",
-        "Pittsburgh": "pa", "Portland": "or wa", "Raleigh-Durham": "nc", "Richmond": "va", "Sacramento": "ca",
-        "Salt Lake City": "ut", "San Antonio": "tx", "San Diego": "ca", "San Francisco Bay Area": "ca",
-        "Savannah": "ga", "Seattle": "wa", "St. Louis": "mo il", "Tampa": "fl", "Tucson": "az",
-        "Washington, D.C.": "dc va md wv",
-    }.items()
-}
+MARKETS: list[str] = sorted(_MARKETS)
 
 _STATE_NAMES = {
     "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca", "colorado": "co",
@@ -217,14 +223,16 @@ _STATE_NAMES = {
     "south dakota": "sd", "tennessee": "tn", "texas": "tx", "utah": "ut", "vermont": "vt", "virginia": "va",
     "washington": "wa", "washington state": "wa", "west virginia": "wv", "wisconsin": "wi", "wyoming": "wy",
 }
-
 _STATE_CODES = set(_STATE_NAMES.values())
 
-# A location in another country is never matched to a US market
-# ("Birmingham, UK" is not Birmingham, AL).
+# A location in another country is never matched to a US market.
 _FOREIGN = re.compile(
-    r"\b(uk|u k|united kingdom|england|scotland|wales|ireland|canada|mexico|costa rica|australia|germany|"
-    r"france|spain|india|china|japan|brazil|puerto rico|ontario|british columbia|quebec|alberta)\b"
+    r"\b(uk|u k|united kingdom|great britain|england|scotland|wales|ireland|canada|mexico|costa rica|"
+    r"australia|new zealand|germany|france|spain|portugal|italy|netherlands|belgium|switzerland|austria|"
+    r"poland|russia|russian federation|ukraine|turkey|greece|sweden|norway|denmark|finland|india|china|"
+    r"japan|south korea|korea|singapore|hong kong|taiwan|philippines|vietnam|thailand|indonesia|israel|"
+    r"uae|united arab emirates|dubai|saudi arabia|qatar|egypt|south africa|nigeria|kenya|brazil|argentina|"
+    r"chile|colombia|peru|puerto rico|ontario|british columbia|quebec|alberta)\b"
 )
 
 # Words that only describe a market, never name it: "Greater Houston Metro
@@ -233,8 +241,129 @@ _MARKET_FILLER = re.compile(
     r"\b(greater|metropolitan statistical area|metropolitan area|metropolitan|metro area|metroplex|metro|msa|"
     r"region|submarket|market|city of)\b"
 )
-
 _ZIP = re.compile(r"\s*\b\d{5}(-\d{4})?$")
+_TRAILING_STATE = re.compile(r"^(.*\S)\s+([a-z]{2})(?:\s+\d{5}(?:-\d{4})?)?$")
+
+# Aliases this short are abbreviations ("dc", "dfw", "nova"): fine as a whole
+# entry, but never searched for as a word inside longer text ("DC Ranch").
+_MIN_PARTIAL_ALIAS_CHARS = 5
+
+
+# --- Text helpers -------------------------------------------------------------
+
+
+def _clean(text: Any) -> str:
+    """Lowercase, ASCII dashes, punctuation to spaces, single-spaced."""
+    text = str(text).casefold().replace("&", " and ")
+    text = re.sub(r"[‐-―]", "-", text)
+    text = re.sub(r"[^\w\s,/-]", " ", text)  # drops periods: "St. Louis" -> "st louis"
+    return " ".join(text.split())
+
+
+def _key(text: str) -> str:
+    """A lookup key: cleaned, with dashes, slashes and commas as spaces."""
+    return " ".join(_clean(text).replace("-", " ").replace("/", " ").replace(",", " ").split())
+
+
+# --- Lookup tables, built and checked once at import --------------------------
+
+_ASSET_TYPE_LOOKUP: dict[str, str] = {}
+for _tier in _TIERS:
+    for _name, _phrases in _tier.items():
+        for _phrase in (_name, *_phrases):
+            _ASSET_TYPE_LOOKUP.setdefault(_key(_phrase), _name)
+
+# Each tier's phrases compiled once: (type, phrase length, pattern).
+_COMPILED_TIERS = tuple(
+    tuple(
+        (name, len(phrase), re.compile(rf"(?<!\w){re.escape(phrase)}(?!\w)"))
+        for name, phrases in tier.items()
+        for phrase in phrases
+    )
+    for tier in _TIERS
+)
+
+_MARKET_STATES: dict[str, frozenset[str]] = {name: frozenset(states.split()) for name, (states, _) in _MARKETS.items()}
+_MARKET_LOOKUP: dict[str, str] = {}
+for _name, (_states, _aliases) in _MARKETS.items():
+    if not _MARKET_STATES[_name] <= _STATE_CODES:
+        raise RuntimeError(f"{_name} lists an unknown state code.")
+    for _alias in (_name, *_aliases):
+        if _MARKET_LOOKUP.get(_key(_alias), _name) != _name:
+            raise RuntimeError(f"Market alias {_alias!r} is listed for two markets.")
+        _MARKET_LOOKUP[_key(_alias)] = _name
+
+
+# --- Mandate input: strict -----------------------------------------------------
+
+
+def canonical_asset_type(text: Optional[str]) -> Optional[str]:
+    """For mandate input: the canonical type if `text` IS a canonical name or
+    an exact alias ("apartments"), else None. Never searches inside text, so
+    "Office and Retail" is rejected rather than saved as Office."""
+    if not text or not str(text).strip():
+        return None
+    return _ASSET_TYPE_LOOKUP.get(_key(text))
+
+
+def canonical_market(text: Optional[str]) -> Optional[str]:
+    """For mandate input: the canonical market if `text` IS a canonical name
+    or an exact alias, optionally followed by its state ("DFW", "Dallas, TX",
+    "Franklin, Tennessee"), else None. "Dallas and Houston" is rejected."""
+    if not text or not str(text).strip():
+        return None
+    pieces = [piece.strip() for piece in _clean(text).split(",") if piece.strip()]
+    whole = _MARKET_LOOKUP.get(_key(text))
+    if whole:
+        return whole
+    if len(pieces) != 2:
+        return None
+    states = _as_states(pieces[1])
+    if not states:
+        return None
+    for candidate in [f"{pieces[0]} {state}" for state in sorted(states)] + [pieces[0]]:
+        market = _MARKET_LOOKUP.get(_key(candidate))
+        if market and states & _MARKET_STATES[market]:
+            return market
+    return None
+
+
+# --- Deal data: loose ----------------------------------------------------------
+
+
+def normalize_asset_type(text: Optional[str]) -> Optional[str]:
+    """For deal data: the canonical property type a description is about, or
+    None (see the tiers above)."""
+    if not text or not str(text).strip():
+        return None
+    key = _key(text)
+    if key in _ASSET_TYPE_LOOKUP:
+        return _ASSET_TYPE_LOOKUP[key]
+    for tier in _COMPILED_TIERS:
+        best: Optional[tuple[int, int, str]] = None
+        for name, length, pattern in tier:
+            found = pattern.search(key)
+            if found and (best is None or (found.start(), -length) < best[:2]):
+                best = (found.start(), -length, name)
+        if best:
+            return best[2]
+    return None
+
+
+@dataclass(frozen=True)
+class MarketMatch:
+    """A market read from deal data, and how sure the match is.
+
+    confidence is "exact" when a whole place in the text is a known name
+    ("Plano" in "12 Elm St, Plano, TX"), and "partial" when the market was
+    only found as a word inside a longer place name ("Uptown Dallas",
+    "Brooklyn Park") - screening should ask a reviewer to confirm those.
+    """
+
+    market: str
+    confidence: Literal["exact", "partial"]
+    matched_text: str
+    field: Optional[str] = None
 
 
 def _as_states(piece: str) -> set[str]:
@@ -250,62 +379,6 @@ def _as_states(piece: str) -> set[str]:
     return set()
 
 
-def _clean(text: str) -> str:
-    """Lowercase, ASCII dashes, punctuation to spaces, single-spaced."""
-    text = str(text).casefold().replace("&", " and ")
-    text = re.sub(r"[‐-―]", "-", text)
-    text = re.sub(r"[^\w\s,/-]", " ", text)  # drops periods: "St. Louis" -> "st louis"
-    return " ".join(text.split())
-
-
-def _contains_phrase(text: str, phrase: str) -> bool:
-    return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
-
-
-# Every canonical name (cleaned) and alias, pointing at its canonical name.
-_ASSET_TYPE_LOOKUP: dict[str, str] = {}
-for _canonical, _phrases in _ASSET_TYPE_PHRASES.items():
-    for _phrase in (_canonical, *_phrases):
-        _ASSET_TYPE_LOOKUP[_clean(_phrase).replace("-", " ")] = _canonical
-
-_MARKET_LOOKUP: dict[str, str] = {}
-for _canonical, _aliases in _MARKET_ALIASES.items():
-    for _alias in (_canonical, *_aliases):
-        _key = " ".join(_clean(_alias).replace("-", " ").replace(",", " ").split())
-        # An alias may only ever mean one market.
-        if _MARKET_LOOKUP.get(_key, _canonical) != _canonical:
-            raise RuntimeError(f"Market alias {_alias!r} is listed for two markets.")
-        _MARKET_LOOKUP[_key] = _canonical
-if set(_MARKET_STATES) != set(_MARKET_ALIASES):
-    raise RuntimeError("Every market needs its states in _MARKET_STATES.")
-
-
-def _earliest(text: str, tier: dict[str, tuple[str, ...]]) -> Optional[str]:
-    """The type in `tier` mentioned first in `text` (longest phrase on a tie)."""
-    best: Optional[tuple[int, int, str]] = None
-    for name, phrases in tier.items():
-        for phrase in phrases:
-            match = re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text)
-            if match and (best is None or (match.start(), -len(phrase)) < best[:2]):
-                best = (match.start(), -len(phrase), name)
-    return None if best is None else _SPECIFIC_RESOLVES_TO.get(best[2], best[2])
-
-
-def normalize_asset_type(text: Optional[str]) -> Optional[str]:
-    """The canonical property type a piece of text describes, or None."""
-    if not text or not str(text).strip():
-        return None
-    cleaned = _clean(text).replace("-", " ").replace("/", " ").replace(",", " ")
-    cleaned = " ".join(cleaned.split())
-    if cleaned in _ASSET_TYPE_LOOKUP:
-        return _ASSET_TYPE_LOOKUP[cleaned]
-    return _earliest(cleaned, _SPECIFIC_TYPE_PHRASES) or _earliest(cleaned, _GENERAL_TYPE_PHRASES)
-
-
-def _words(value: str) -> str:
-    return " ".join(value.replace("-", " ").replace("/", " ").replace(",", " ").split())
-
-
 def _parse_location(text: str) -> tuple[list[str], set[str]]:
     """(place pieces to look up, most specific first; the states named)."""
     cleaned = _MARKET_FILLER.sub(" ", _clean(text))
@@ -317,8 +390,7 @@ def _parse_location(text: str) -> tuple[list[str], set[str]]:
         if piece_states:
             states |= piece_states
             continue
-        # No comma before the state: "Dallas TX 75201".
-        trailing = re.match(r"^(.*\S)\s+([a-z]{2})(?:\s+\d{5}(?:-\d{4})?)?$", piece)
+        trailing = _TRAILING_STATE.match(piece)  # no comma: "Dallas TX 75201"
         if trailing and trailing.group(2) in _STATE_CODES and trailing.group(1) not in _STATE_NAMES:
             states.add(trailing.group(2))
             piece = trailing.group(1)
@@ -326,61 +398,81 @@ def _parse_location(text: str) -> tuple[list[str], set[str]]:
     return [place for place in places if place], states
 
 
-def _candidates(places: list[str], states: set[str]) -> list[str]:
-    """Strings to look up, most specific first: each place with each state
-    ("franklin tn"), the place, its dash/slash parts, and - only as a last
-    resort - the words inside it ("uptown dallas" -> "dallas")."""
-    candidates: list[str] = []
+def _candidates(places: list[str], states: set[str]) -> list[tuple[str, bool]]:
+    """(lookup string, is_partial), most specific first: each place with each
+    state ("franklin tn"), the place, its dash/slash parts, and - only as a
+    last resort, marked partial - the words inside it ("uptown dallas" ->
+    "dallas"), skipping short abbreviations ("DC Ranch")."""
+    candidates: list[tuple[str, bool]] = []
+    seen: set[str] = set()
 
-    def add(value: str) -> None:
-        value = _words(value)
-        if value and value not in candidates and (value not in _STATE_NAMES or value in _MARKET_LOOKUP):
-            candidates.append(value)
+    def add(value: str, partial: bool) -> None:
+        value = _key(value)
+        if not value or value in seen:
+            return
+        if value in _STATE_NAMES and value not in _MARKET_LOOKUP:
+            return
+        if partial and len(value) < _MIN_PARTIAL_ALIAS_CHARS:
+            return
+        seen.add(value)
+        candidates.append((value, partial))
 
     for place in places:
         for state in sorted(states):
-            add(f"{place} {state}")
-        add(place)
+            add(f"{place} {state}", False)
+        add(place, False)
         for part in re.split(r"[-/]", place):
-            add(part)
+            add(part, False)
     for place in places:
-        words = _words(place).split()
+        words = _key(place).split()
         for size in range(min(len(words), 4) - 1, 0, -1):
             for start in range(len(words) - size + 1):
-                add(" ".join(words[start : start + size]))
+                add(" ".join(words[start : start + size]), True)
     return candidates
 
 
-def normalize_market(text: Optional[str]) -> Optional[str]:
-    """The canonical market a location string is in, or None.
-
-    Works on a mandate entry ("DFW"), a profile's market ("Dallas-Fort
-    Worth-Arlington, TX MSA") or a street address ("12 Elm St, Plano, TX").
-    A bare canonical name ("Portland") is read as that market; when a state
-    is named, a market in a different state is never matched ("Portland, ME",
-    "Buffalo, New York"), and a foreign country never matches."""
+def match_market(text: Optional[str], *, field: Optional[str] = None) -> Optional[MarketMatch]:
+    """For deal data: the market a location string is in, with its confidence,
+    or None. When a state is named, a market in a different state is never
+    matched; a foreign country never matches."""
     if not text or not str(text).strip() or _FOREIGN.search(_clean(text)):
         return None
     places, states = _parse_location(str(text))
-    for candidate in _candidates(places, states):
+    for candidate, partial in _candidates(places, states):
         market = _MARKET_LOOKUP.get(candidate)
         if market and (not states or states & _MARKET_STATES[market]):
-            return market
+            return MarketMatch(market, "partial" if partial else "exact", candidate, field)
     return None
+
+
+def normalize_market(text: Optional[str]) -> Optional[str]:
+    """For deal data: just the market name from match_market(), or None."""
+    match = match_market(text)
+    return match.market if match else None
 
 
 # Deal Profile fields read for a deal's market, best first (M3.2).
 PROFILE_MARKET_FIELDS = ("market", "submarket", "location", "address")
 
 
-def profile_market(profile: Any) -> Optional[str]:
-    """The canonical market of a Deal Profile, from the first of its location
-    fields that names a known market, or None."""
+def profile_market_match(profile: Any) -> Optional[MarketMatch]:
+    """A Deal Profile's market and which field it came from: the first field
+    with an exact match, else the first partial one, else None. M3.2 should
+    show `field` and `confidence` to the reviewer and treat "partial" or
+    None as "needs review", not as a pass or fail."""
+    partial: Optional[MarketMatch] = None
     for field_name in PROFILE_MARKET_FIELDS:
-        market = normalize_market(getattr(profile, field_name, None))
-        if market:
-            return market
-    return None
+        match = match_market(getattr(profile, field_name, None), field=field_name)
+        if match and match.confidence == "exact":
+            return match
+        partial = partial or match
+    return partial
+
+
+def profile_market(profile: Any) -> Optional[str]:
+    """Just the market name from profile_market_match(), or None."""
+    match = profile_market_match(profile)
+    return match.market if match else None
 
 
 def profile_asset_type(profile: Any) -> Optional[str]:
