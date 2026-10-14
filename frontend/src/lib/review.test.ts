@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DealHistory, DealProfile, WithheldValue } from "./api";
 import { ALL_FIELDS, FIELD_GROUPS, formatValue, parseInput, type FieldSpec } from "./dealFields";
+import { citationFor, linkIsFresh, pdfPageUrl, verificationText } from "./evidence";
 import { attentionCount, generalNotes, noteNamesField, noteText, reviewField } from "./fieldStatus";
 import { historyEntries } from "./history";
 import { acceptProposal, buildChanges, changeCount, dismissProposal, initialInputs } from "./reviewForm";
@@ -272,5 +273,39 @@ describe("historyEntries", () => {
       me,
     );
     expect(entries[0].what).toBe("changed Unverified proposals: 1 item → none");
+  });
+});
+
+describe("evidence helpers", () => {
+  const verified = cite("asking_price", 3);
+  const reviewOf = (deal: DealProfile, name: string) => reviewField(deal, name);
+
+  it("prefers a field's verified citation, then a held-back value's", () => {
+    expect(citationFor(reviewOf(profile({ asking_price: 1, evidence: [verified] }), "asking_price"))).toEqual({
+      citation: verified,
+      verified: true,
+    });
+    const held = { ...proposal, evidence: cite("noi", 9) };
+    expect(citationFor(reviewOf(profile({ withheld_values: [held] }), "noi"))).toMatchObject({ verified: false });
+    expect(citationFor(reviewOf(profile(), "noi"))).toBeNull();
+  });
+
+  it("says what was checked", () => {
+    expect(verificationText(verified, true)).toMatch(/contains this value/);
+    expect(verificationText({ ...verified, verification: "quote_only" }, true)).toMatch(/summarizes/);
+    expect(verificationText(verified, false)).toMatch(/didn't check out/);
+  });
+
+  it("opens the PDF at a page", () => {
+    expect(pdfPageUrl("https://x/doc.pdf?token=t", 4)).toBe("https://x/doc.pdf?token=t#page=4");
+    expect(pdfPageUrl("https://x/doc.pdf?token=t#page=2", 4)).toBe("https://x/doc.pdf?token=t#page=4");
+    expect(pdfPageUrl("https://x/doc.pdf?token=t", null)).toBe("https://x/doc.pdf?token=t");
+  });
+
+  it("treats a link about to expire as stale", () => {
+    const now = Date.parse("2026-10-14T12:00:00Z");
+    const at = (seconds: number) => ({ url: "u", filename: "f", expires_at: new Date(now + seconds * 1000).toISOString() });
+    expect(linkIsFresh(at(600), now)).toBe(true);
+    expect(linkIsFresh(at(10), now)).toBe(false);
   });
 });
