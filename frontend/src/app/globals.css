@@ -1,0 +1,439 @@
+/* Colours and spacing follow the marketing site's tokens
+   (site/assets/css/main.css) so the app reads as the same product. */
+:root {
+  --bg: #060607;
+  --bg-1: #0a0a0c;
+  --bg-2: #0e0e11;
+  --bg-raise: #141417;
+  --line: rgba(255, 255, 255, 0.085);
+  --line-soft: rgba(255, 255, 255, 0.045);
+  --ink: #f4f5f6;
+  --ink-2: #a9acb2;
+  --ink-3: #71757c;
+  --ok: #8fd4a4;
+  --warn: #e8c37a;
+  --error: #f09a9a;
+  --radius: 10px;
+  --gutter: clamp(16px, 5vw, 48px);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body), "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--f-display), "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0 0 0.5em;
+}
+
+h1 {
+  font-size: clamp(1.6rem, 3vw, 2.1rem);
+}
+
+a {
+  color: var(--ink);
+}
+
+code,
+.mono {
+  font-family: var(--f-mono), ui-monospace, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.muted {
+  color: var(--ink-2);
+}
+
+.page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px var(--gutter) 80px;
+}
+
+/* A page's title with its main action or status beside it. */
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.page-head h1 {
+  margin: 0;
+}
+
+.breadcrumb {
+  margin: 0 0 12px;
+  font-size: 0.88rem;
+}
+
+.breadcrumb a {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.page--narrow {
+  max-width: 420px;
+  padding-top: 12vh;
+}
+
+/* Header */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px var(--gutter);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+
+.app-header__brand {
+  font-family: var(--f-display), sans-serif;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 0.92rem;
+}
+
+.app-header__nav a {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.app-header__nav a:hover,
+.app-header__nav a[aria-current="page"] {
+  color: var(--ink);
+}
+
+.app-header__email {
+  overflow-wrap: anywhere;
+}
+
+/* Cards and forms */
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.field label {
+  font-size: 0.88rem;
+  color: var(--ink-2);
+}
+
+input[type="email"],
+input[type="password"] {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--ink);
+  font: inherit;
+}
+
+input:focus-visible,
+button:focus-visible,
+a:focus-visible,
+.dropzone:focus-within {
+  outline: 2px solid var(--ink-2);
+  outline-offset: 2px;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 20px;
+  border-radius: 999px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--bg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.btn--sm {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+}
+
+.btn--block {
+  width: 100%;
+}
+
+/* Notices */
+.notice {
+  border-radius: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--bg-raise);
+  margin: 16px 0 0;
+}
+
+.notice--error {
+  border-color: rgba(240, 154, 154, 0.4);
+  color: var(--error);
+}
+
+.notice--ok {
+  border-color: rgba(143, 212, 164, 0.4);
+  color: var(--ok);
+}
+
+/* Upload */
+.dropzone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 40px 20px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dropzone--active {
+  border-color: var(--ink-2);
+  background: var(--bg-raise);
+}
+
+.dropzone input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.file-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-1);
+}
+
+.file-row__name {
+  overflow-wrap: anywhere;
+}
+
+.steps {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.steps li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  color: var(--ink-3);
+}
+
+.steps li[data-state="active"] {
+  color: var(--ink);
+}
+
+.steps li[data-state="done"] {
+  color: var(--ok);
+}
+
+.progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.progress__bar {
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.2s;
+}
+
+.progress__bar--indeterminate {
+  width: 35%;
+  animation: slide 1.2s ease-in-out infinite;
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress__bar--indeterminate {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+
+/* Deal summary */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.fact {
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-1);
+}
+
+.fact dt {
+  font-size: 0.8rem;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+
+.fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.flags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+}
+
+/* Badges: review status, field flags */
+.badge {
+  display: inline-block;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.badge--ok {
+  color: var(--ok);
+  border-color: rgba(143, 212, 164, 0.4);
+}
+
+.badge--warn {
+  color: var(--warn);
+  border-color: rgba(232, 195, 122, 0.4);
+}
+
+.badge--error {
+  color: var(--error);
+  border-color: rgba(240, 154, 154, 0.4);
+}
+
+/* Deal list */
+.deal-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.deal-list__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-1);
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.deal-list__item:hover {
+  border-color: var(--ink-3);
+  background: var(--bg-raise);
+}
+
+.deal-list__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.deal-list__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+}

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,15 @@ class DealStore:
         if not path.exists():
             raise DealNotFoundError(deal_id)
         return REPEDealProfile(**json.loads(path.read_text()))
+
+    def saved_at(self, deal_id: str) -> datetime:
+        """When the deal was last saved (extracted, corrected, or reviewed),
+        from its file's modification time - this store keeps no timestamps
+        of its own."""
+        path = self._path_for(deal_id)
+        if not path.exists():
+            raise DealNotFoundError(deal_id)
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
 
     def list_ids(self) -> list[str]:
         return sorted(
