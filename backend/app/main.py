@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -8,6 +9,7 @@ from typing import Any, Literal, NoReturn, Optional
 from uuid import UUID, uuid4
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from backend.app.h9n.auth import AuthenticatedUser, get_current_user, resolve_organization
@@ -44,6 +46,21 @@ app = FastAPI()
 app.include_router(rag_router)
 # Milestone 3.1: investment mandates (see backend/app/h9n/screening/api.py).
 app.include_router(mandate_router)
+
+# Milestone 2.1: the web app (frontend/) runs on its own address, so browsers
+# only let it call this API from origins listed here. Comma-separated; the
+# default is the Next.js dev server.
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("H9N_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "PATCH"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 # Milestone 1, item 4: where extracted deals are saved so a reviewer can
 # fetch and correct one later by id. See store.py for why this is a simple
