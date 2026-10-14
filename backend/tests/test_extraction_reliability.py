@@ -192,7 +192,7 @@ def test_invalid_output_is_retried_with_the_validation_errors_then_succeeds():
     deal = extract_repe_deal(PAGES, client=client)
 
     assert deal.asking_price == 10_000_000
-    assert deal.review_status == "pending"
+    assert deal.review_status == "draft"
     assert client.messages.create.call_count == 2
     retry_messages = client.messages.create.call_args.kwargs["messages"]
     # The retry replays the failed call before the error, as the API requires
@@ -643,7 +643,7 @@ def test_kept_evidence_shows_the_stored_value_not_the_models_text():
 def test_reviewer_fields_always_start_at_their_defaults():
     deal = _enforce()
 
-    assert deal.review_status == "pending"
+    assert deal.review_status == "draft"
     assert deal.corrected_fields == []
     assert deal.review_feedback is None
 
@@ -1066,7 +1066,8 @@ def test_feedback_updates_replace_citations_and_resolve_withheld_entries():
     assert [e.snippet for e in updates["evidence"]] == ["Deal: Fixture Deal", "Asking Price: $950,000."]
     # The old asking_price proposal is superseded; the NOI one still waits.
     assert [w.field_name for w in updates["withheld_values"]] == ["noi", "cap_rate"]
-    assert updates["review_status"] == "pending"
+    # The status is the review workflow's to set, not the extractor's.
+    assert "review_status" not in updates
 
 
 def test_feedback_updates_drop_the_citation_of_a_cleared_field():

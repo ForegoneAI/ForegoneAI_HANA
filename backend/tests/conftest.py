@@ -5,6 +5,7 @@ import pytest
 from backend.app import main
 from backend.app.h9n.auth import get_current_user
 from backend.app.h9n.extraction import repe_extractor
+from backend.app.h9n.review.repository import InMemoryDealRepository
 from backend.tests.auth_fakes import TEST_USER, FakeRunRepository
 
 
@@ -23,6 +24,14 @@ def run_repository(monkeypatch) -> FakeRunRepository:
     fake = FakeRunRepository()
     monkeypatch.setattr(main, "get_extraction_run_repository", lambda: fake)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def deal_repository(monkeypatch) -> InMemoryDealRepository:
+    """Saved deals (Milestone 2.4) live in memory during tests."""
+    repository = InMemoryDealRepository()
+    monkeypatch.setattr(main, "get_deal_repository", lambda: repository)
+    return repository
 
 
 @pytest.fixture(autouse=True)

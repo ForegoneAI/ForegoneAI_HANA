@@ -2,13 +2,14 @@ import hashlib
 import logging
 import os
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, NoReturn, Optional
+from typing import Any, Callable, Iterator, NoReturn, Optional, TypeVar
 from uuid import UUID, uuid4
 
-from fastapi import Body, Depends, FastAPI, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -34,8 +35,19 @@ from backend.app.h9n.extraction.run_repository import (
 from backend.app.h9n.ingestion.pdf_reader import MAX_UPLOAD_BYTES, PdfReadError, read_pdf_bytes
 from backend.app.h9n.rag.api import router as rag_router
 from backend.app.h9n.rag.config import RagConfigurationError, get_rag_settings
-from backend.app.h9n.review.store import DealNotFoundError, DealStore
+from backend.app.h9n.review.models import (
+    DealConflictError,
+    DealHistory,
+    DealNotFoundError,
+    DealRecord,
+    DealUpdateError,
+    NewDeal,
+    ReviewAction,
+)
+from backend.app.h9n.review.repository import DealRepository, SupabaseDealRepository
+from backend.app.h9n.review.workflow import plan_corrections, plan_review_action
 from backend.app.h9n.screening.api import router as mandate_router
+from backend.app.h9n.schemas.base_deal import ReviewStatus
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 
 
@@ -62,10 +74,14 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# Milestone 1, item 4: where extracted deals are saved so a reviewer can
-# fetch and correct one later by id. See store.py for why this is a simple
-# on-disk store rather than a real database.
-_review_store = DealStore()
+T = TypeVar("T")
+
+
+# Milestone 2.4: where extracted deals and their review history are saved
+# (see review/repository.py). Built on first use, like the run repository.
+@lru_cache
+def get_deal_repository() -> DealRepository:
+    return SupabaseDealRepository(get_rag_settings())
 
 
 # Milestone 1.3: where extraction runs are recorded. Built on first use so the
@@ -79,7 +95,7 @@ def get_extraction_run_repository() -> SupabaseExtractionRunRepository:
 # saved under, so the caller can look it up again later for review, and the
 # id of the extraction run recorded for it in Supabase (Milestone 1.3).
 class ExtractResponse(BaseModel):
-    deal_id: str
+    deal_id: UUID
     profile: REPEDealProfile
     extraction_run_id: UUID
 
@@ -87,27 +103,52 @@ class ExtractResponse(BaseModel):
 # One row of GET /deals: enough for the web app's deal list to show and
 # reopen a saved deal without loading every full profile (Milestone 2.1).
 class DealSummary(BaseModel):
-    deal_id: str
+    deal_id: UUID
     organization_id: UUID
     deal_name: Optional[str]
     property_name: Optional[str]
-    review_status: str
+    review_status: ReviewStatus
     saved_at: datetime
 
 
-# What a reviewer submits to POST /deals/{deal_id}/review. Only "approved"
-# and "rejected" are accepted here - "pending" is only ever the starting
-# state a fresh extraction gets, never something submitted after the fact.
-class ReviewRequest(BaseModel):
-    status: Literal["approved", "rejected"]
+# A saved deal as the API returns it (Milestone 2.4): the profile plus where
+# it stands in review. `version` must be sent back with any change, so a
+# change made against an out-of-date copy is refused instead of overwriting
+# someone else's. The source page text stays server-side.
+class DealOut(BaseModel):
+    deal_id: UUID
+    organization_id: UUID
+    status: ReviewStatus
+    version: int
+    source_filename: str
+    extraction_run_id: Optional[UUID]
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
+    profile: REPEDealProfile
 
-    # Only meaningful when status="rejected". The reviewer's own
-    # explanation of what's wrong (e.g. "the asking price is wrong, it
-    # should be around $950k per page 4") - if given, and the deal's
-    # source document text is still available (see DealStore.save_pages),
-    # this is sent to apply_reviewer_feedback() to automatically re-derive
-    # and apply the corrected field(s), instead of requiring the reviewer
-    # to work out and submit the exact value themselves via PATCH.
+    @classmethod
+    def from_record(cls, record: DealRecord) -> "DealOut":
+        return cls(deal_id=record.id, **record.model_dump(exclude={"id", "source_pages"}))
+
+
+# What a reviewer submits to PATCH /deals/{deal_id}: the version they
+# edited, and field name -> corrected value.
+class CorrectionRequest(BaseModel):
+    version: int
+    changes: dict[str, Any]
+
+
+# What a reviewer submits to POST /deals/{deal_id}/review (Milestone 2.4).
+class ReviewRequest(BaseModel):
+    action: ReviewAction
+    version: int
+
+    # Required for "reject": the reviewer's own explanation of what's wrong
+    # (e.g. "the asking price is wrong, it should be around $950k per page
+    # 4"). It's sent to apply_reviewer_feedback() to re-derive and apply the
+    # corrected field(s) from the source text, instead of requiring the
+    # reviewer to work out and submit the exact value themselves via PATCH.
     feedback: Optional[str] = None
 
 
@@ -169,7 +210,7 @@ def extract_repe_deal_from_upload(
     except PdfReadError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    deal_id = uuid4().hex
+    deal_id = uuid4()
     started_at = datetime.now(timezone.utc)
     started = time.perf_counter()
     deal: Optional[REPEDealProfile] = None
@@ -202,13 +243,21 @@ def extract_repe_deal_from_upload(
     if error is not None:
         _raise_extraction_error(error)
 
-    _review_store.save(deal, deal_id)
-    _review_store.save_owner(deal_id, organization_id)
-    # So a reviewer's future rejection feedback has something to re-derive
-    # a correction from (see the review endpoint below) - without this, a
-    # correction could only ever be the exact value a human already worked
-    # out, never one Claude re-derives from the source text.
-    _review_store.save_pages(deal_id, pages)
+    # Saved with its source pages, so a reviewer's later feedback can be
+    # checked against the document again (see the review endpoint below).
+    _deals(
+        lambda deals: deals.create(
+            NewDeal(
+                id=deal_id,
+                organization_id=organization_id,
+                profile=deal,
+                source_filename=source_filename,
+                source_pages=pages,
+                extraction_run_id=extraction_run_id,
+                created_by=user.user_id,
+            )
+        )
+    )
     return ExtractResponse(deal_id=deal_id, profile=deal, extraction_run_id=extraction_run_id)
 
 
@@ -253,12 +302,49 @@ def _record_extraction_run(run: ExtractionRunRecord) -> UUID:
         ) from exc
 
 
-def _require_deal_access(deal_id: str, user: AuthenticatedUser) -> None:
-    """404s unless the deal belongs to one of the caller's organizations
-    (Milestone 2.5). Another organization's deal gets the same response as a
-    deal that doesn't exist, so its existence isn't revealed."""
-    if _review_store.owner_of(deal_id) not in user.organization_ids:
-        raise HTTPException(status_code=404, detail=f"No deal found with id {deal_id!r}.")
+@contextmanager
+def _deal_errors() -> Iterator[None]:
+    """Turns deal-review failures into safe HTTP errors (Milestone 2.4). A
+    deal outside the caller's organizations is a 404, the same as one that
+    doesn't exist, so its existence isn't revealed (M2.5)."""
+    try:
+        yield
+    except DealNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="No deal found with that id.") from exc
+    except DealConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DealUpdateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RagConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # Database details go to the log, never to the caller.
+        logger.exception("Deal storage failed")
+        raise HTTPException(status_code=502, detail="Deals could not be reached. Try again shortly.") from exc
+
+
+def _deals(action: Callable[[DealRepository], T]) -> T:
+    """Runs one deal-storage action, with _deal_errors()."""
+    with _deal_errors():
+        return action(get_deal_repository())
+
+
+def _load_deal(deal_id: str, user: AuthenticatedUser) -> DealRecord:
+    """The caller's deal, or a 404 (also for an id that isn't a valid id)."""
+    try:
+        parsed = UUID(deal_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="No deal found with that id.") from None
+    return _deals(lambda deals: deals.get(parsed, user.organization_ids))
+
+
+def _require_version(deal: DealRecord, version: int) -> None:
+    """Refuses a change made against an out-of-date copy before doing any
+    work; the database checks again when saving."""
+    if version != deal.version:
+        raise HTTPException(
+            status_code=409,
+            detail="Someone else changed this deal since you opened it. Reload it to see their changes.",
+        )
 
 
 # What GET /me returns: who is signed in and which organizations they may act
@@ -284,121 +370,105 @@ def current_user(user: AuthenticatedUser = Depends(get_current_user)) -> Current
     )
 
 
-# Milestone 2.1: the deals the caller's organizations own, most recently
-# saved first, so a reviewer can reopen one in the web app. Deals saved
-# without an owner (before Milestone 2.5) are left out, as they are by every
-# other deal route.
+# Milestone 2.1 / 2.4: the deals the caller's organizations own, most
+# recently changed first, so a reviewer can reopen one in the web app.
 @app.get("/api/h9n/repe/deals", response_model=list[DealSummary])
 def list_repe_deals(user: AuthenticatedUser = Depends(get_current_user)) -> list[DealSummary]:
-    summaries = []
-    for deal_id in _review_store.list_ids():
-        owner = _review_store.owner_of(deal_id)
-        if owner not in user.organization_ids:
-            continue
-        deal = _review_store.get(deal_id)
-        summaries.append(
-            DealSummary(
-                deal_id=deal_id,
-                organization_id=owner,
-                deal_name=deal.deal_name,
-                property_name=deal.property_name,
-                review_status=deal.review_status,
-                saved_at=_review_store.saved_at(deal_id),
-            )
+    summaries = _deals(lambda deals: deals.list(user.organization_ids))
+    return [
+        DealSummary(
+            deal_id=summary.id,
+            organization_id=summary.organization_id,
+            deal_name=summary.deal_name,
+            property_name=summary.property_name,
+            review_status=summary.status,
+            saved_at=summary.updated_at,
         )
-    return sorted(summaries, key=lambda summary: summary.saved_at, reverse=True)
+        for summary in summaries
+    ]
 
 
-# Milestone 1, item 4: fetch a previously extracted deal by id, e.g. to show
-# it to a reviewer in a UI.
-@app.get("/api/h9n/repe/deals/{deal_id}", response_model=REPEDealProfile)
-def get_repe_deal(deal_id: str, user: AuthenticatedUser = Depends(get_current_user)) -> REPEDealProfile:
-    _require_deal_access(deal_id, user)
-    try:
-        return _review_store.get(deal_id)
-    except DealNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No deal found with id {deal_id!r}.")
+# Fetch a saved deal: its profile and where it stands in review.
+@app.get("/api/h9n/repe/deals/{deal_id}", response_model=DealOut)
+def get_repe_deal(deal_id: str, user: AuthenticatedUser = Depends(get_current_user)) -> DealOut:
+    return DealOut.from_record(_load_deal(deal_id, user))
 
 
-# Milestone 1, item 4: a reviewer submits corrected values for one or more
-# fields (e.g. {"asking_price": 9500000}), which are validated, applied, and
-# recorded in the deal's own corrected_fields list so it's visible later
-# which values were human-verified rather than model-extracted.
-@app.patch("/api/h9n/repe/deals/{deal_id}", response_model=REPEDealProfile)
+# Milestone 2.4: everything reviewers have done to a deal, oldest first -
+# each corrected field (original value, corrected value, its evidence, who,
+# when) and each status change.
+@app.get("/api/h9n/repe/deals/{deal_id}/history", response_model=DealHistory)
+def get_repe_deal_history(deal_id: str, user: AuthenticatedUser = Depends(get_current_user)) -> DealHistory:
+    deal = _load_deal(deal_id, user)
+    return _deals(lambda deals: deals.history(deal))
+
+
+# A reviewer corrects one or more fields, e.g.
+# {"version": 3, "changes": {"asking_price": 9500000}}. Values are validated
+# like an extraction (a wrong type or unknown field is a 400), each change is
+# recorded with its original value and evidence (Milestone 2.4), and the
+# field is added to the profile's corrected_fields. An approved deal can't be
+# corrected until it's reopened, and a reviewed deal goes back to draft.
+@app.patch("/api/h9n/repe/deals/{deal_id}", response_model=DealOut)
 def correct_repe_deal(
     deal_id: str,
-    corrections: dict[str, Any] = Body(...),
+    request: CorrectionRequest,
     user: AuthenticatedUser = Depends(get_current_user),
-) -> REPEDealProfile:
-    _require_deal_access(deal_id, user)
-    try:
-        return _review_store.apply_corrections(deal_id, corrections)
-    except DealNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No deal found with id {deal_id!r}.")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+) -> DealOut:
+    deal = _load_deal(deal_id, user)
+    _require_version(deal, request.version)
+    with _deal_errors():
+        changes = plan_corrections(deal, request.changes, actor=user.user_id)
+    if changes is None:  # Every value was already what was asked for.
+        return DealOut.from_record(deal)
+    return DealOut.from_record(_deals(lambda deals: deals.save(deal, changes, expected_version=request.version)))
 
 
-# Milestone 1, item 4: the plan's "Approve and save the validated Deal
-# Profile" step. This is deliberately separate from PATCH /deals/{deal_id}
-# above - correcting a field's value doesn't by itself mean a reviewer has
-# looked at the whole profile and signed off on it, so this is where they
-# explicitly say "yes, this is correct" (approved) or "no, it still isn't"
-# (rejected).
+# Milestone 2.4: a review action on the deal as a whole - "review" (draft ->
+# reviewed), "approve" (draft or reviewed -> approved, the trusted input for
+# screening and underwriting), "reopen" (back to draft), or "reject" (stays
+# or goes back to draft, with feedback). Separate from PATCH above:
+# correcting a field doesn't by itself mean anyone has checked the profile.
 #
-# A "rejected" verdict can also carry `feedback`: the reviewer's own
-# explanation of what's wrong. When given (and the deal's source document
-# text is still available - see DealStore.save_pages), this is handed to
-# apply_reviewer_feedback() to automatically re-derive and apply the
-# corrected field(s) from the original text, and the deal is put back to
-# "pending" so it gets a fresh look rather than sitting "rejected" forever.
-# If there's no source text to re-derive from, or Claude can't confidently
-# derive a fix from the feedback, the rejection and feedback are still
-# recorded - the reviewer can always fall back to PATCH-ing an exact value.
-#
-# Milestone 1.1: a correction is held to the same standard as an extraction.
-# Claude can only change deal value fields (never review_status,
-# withheld_values or evidence directly), and a corrected value is applied only
-# if its citation verifies; otherwise it is added to withheld_values for the
-# reviewer. If the correction step itself fails (provider down, unusable
-# output), the response is a controlled 502/503 that says the rejection and
-# feedback were still saved.
-@app.post("/api/h9n/repe/deals/{deal_id}/review", response_model=REPEDealProfile)
+# "reject" needs `feedback`: the reviewer's explanation of what's wrong. It's
+# saved first, then handed to apply_reviewer_feedback() to re-derive the
+# affected field(s) from the deal's source text. Milestone 1.1: Claude can
+# only change deal value fields, and a corrected value is applied only if
+# its citation verifies; otherwise it is added to withheld_values for the
+# reviewer. If the correction step fails (provider down, unusable output),
+# the response is a controlled 502/503 that says the rejection was saved.
+@app.post("/api/h9n/repe/deals/{deal_id}/review", response_model=DealOut)
 def review_repe_deal(
     deal_id: str,
     review: ReviewRequest,
     user: AuthenticatedUser = Depends(get_current_user),
-) -> REPEDealProfile:
-    _require_deal_access(deal_id, user)
-    try:
-        deal = _review_store.set_review_status(deal_id, review.status)
-    except DealNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No deal found with id {deal_id!r}.")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+) -> DealOut:
+    deal = _load_deal(deal_id, user)
+    _require_version(deal, review.version)
+    with _deal_errors():
+        changes = plan_review_action(deal, review.action, actor=user.user_id, feedback=review.feedback)
+    deal = _deals(lambda deals: deals.save(deal, changes, expected_version=review.version))
 
-    if review.status != "rejected" or not review.feedback or not review.feedback.strip():
-        return deal
-
-    deal = _review_store.apply_corrections(deal_id, {"review_feedback": review.feedback})
-
-    if not _review_store.has_pages(deal_id):
-        # No source text saved for this deal (e.g. it predates this
-        # feature) - nothing to automatically re-derive a fix from.
-        return deal
+    feedback = deal.profile.review_feedback
+    if review.action != "reject" or not deal.source_pages or not feedback:
+        return DealOut.from_record(deal)
 
     try:
-        pages = _review_store.get_pages(deal_id)
-        result = apply_reviewer_feedback(pages, deal, review.feedback)
+        result = apply_reviewer_feedback(deal.source_pages, deal.profile, feedback)
     except ExtractionError as exc:
         _raise_extraction_error(
             exc, prefix="The rejection and feedback were saved, but the automatic correction failed: "
         )
 
-    # One save: the verified corrections, their new citations, the updated
-    # withheld list, and "pending" so a human looks again. {} when Claude
-    # found nothing it could correct - the rejection then stands as submitted.
-    updates = feedback_updates(deal, result)
+    # One save: the verified corrections, their new citations, and the
+    # updated withheld list. {} when Claude found nothing it could correct -
+    # the rejection then stands as submitted.
+    updates = feedback_updates(deal.profile, result)
     if updates:
-        deal = _review_store.apply_corrections(deal_id, updates)
-    return deal
+        with _deal_errors():
+            corrections = plan_corrections(
+                deal, updates, actor=user.user_id, source="reviewer_feedback", feedback=feedback
+            )
+        if corrections is not None:
+            deal = _deals(lambda deals: deals.save(deal, corrections, expected_version=deal.version))
+    return DealOut.from_record(deal)

@@ -1,9 +1,10 @@
 """Automated tests for the FastAPI endpoints, using FastAPI's TestClient so
 no real server, port, or running process is needed. The extraction call is
-monkeypatched so this suite never needs an ANTHROPIC_API_KEY, and the review
-store is pointed at a temp directory so tests never touch backend/data/."""
+monkeypatched so this suite never needs an ANTHROPIC_API_KEY, and saved deals
+live in memory (conftest.py's deal_repository) so tests never need Supabase."""
 
 import io
+from uuid import uuid4
 
 import anthropic
 import httpx2
@@ -20,18 +21,11 @@ from backend.app.h9n.extraction.repe_extractor import (
     ExtractionRefusedError,
     ExtractionUnavailableError,
 )
-from backend.app.h9n.review.store import DealStore
+from backend.app.h9n.review.models import NewDeal
 from backend.app.h9n.schemas.base_deal import WithheldValue
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
-from backend.tests.auth_fakes import TEST_ORGANIZATION_ID
+from backend.tests.auth_fakes import TEST_ORGANIZATION_ID, TEST_USER
 from backend.tests.extraction_fakes import evidence, fake_client, tool_response
-
-
-@pytest.fixture(autouse=True)
-def _use_a_temp_review_store(tmp_path, monkeypatch):
-    """Every test in this file gets its own empty, throwaway review store,
-    instead of all sharing (and polluting) backend/data/reviews/."""
-    monkeypatch.setattr(main, "_review_store", DealStore(tmp_path / "reviews"))
 
 
 def _make_pdf_bytes(text: str) -> bytes:
@@ -40,6 +34,39 @@ def _make_pdf_bytes(text: str) -> bytes:
     pdf_bytes = doc.tobytes()
     doc.close()
     return pdf_bytes
+
+
+def _extract(monkeypatch, client, profile: REPEDealProfile) -> dict:
+    """Uploads a PDF whose extraction returns `profile`; returns the response."""
+    monkeypatch.setattr(main, "extract_repe_deal", lambda pages: profile)
+    response = client.post(
+        "/api/h9n/repe/extract",
+        files={"file": ("fixture.pdf", io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")), "application/pdf")},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _save_deal(deal_repository, profile: REPEDealProfile, *, pages=None) -> str:
+    """Saves a deal straight into the repository, as /extract would."""
+    record = deal_repository.create(
+        NewDeal(
+            id=uuid4(),
+            organization_id=TEST_ORGANIZATION_ID,
+            profile=profile,
+            source_filename="fixture.pdf",
+            source_pages=pages,
+            created_by=TEST_USER.user_id,
+        )
+    )
+    return str(record.id)
+
+
+def _review(client, deal_id, action, version, feedback=None):
+    body = {"action": action, "version": version}
+    if feedback is not None:
+        body["feedback"] = feedback
+    return client.post(f"/api/h9n/repe/deals/{deal_id}/review", json=body)
 
 
 def test_root_endpoint_reports_the_backend_is_running():
@@ -60,205 +87,296 @@ def test_extract_endpoint_rejects_non_pdf_uploads():
     assert response.status_code == 400
 
 
-def test_extract_endpoint_returns_a_deal_profile_and_saves_it(monkeypatch):
+def test_extract_endpoint_returns_a_deal_profile_and_saves_it(monkeypatch, run_repository, deal_repository):
     def fake_extract_repe_deal(pages):
         assert pages[0]["file_name"] == "fixture.pdf"
         return REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000)
 
     monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
-
     client = TestClient(main.app)
-    response = client.post(
+
+    body = client.post(
         "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
+        files={"file": ("fixture.pdf", io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")), "application/pdf")},
+    ).json()
+
+    assert body["profile"]["deal_name"] == "Fixture Deal"
+    assert body["profile"]["asking_price"] == 1_000_000
+    # Saved as a draft at version 1, linked to its run, uploader, and pages.
+    fetched = client.get(f"/api/h9n/repe/deals/{body['deal_id']}").json()
+    assert fetched["status"] == "draft"
+    assert fetched["version"] == 1
+    assert fetched["profile"]["deal_name"] == "Fixture Deal"
+    assert fetched["profile"]["review_status"] == "draft"
+    assert fetched["organization_id"] == str(TEST_ORGANIZATION_ID)
+    assert fetched["created_by"] == str(TEST_USER.user_id)
+    assert fetched["extraction_run_id"] == str(run_repository.run_id)
+    assert fetched["source_filename"] == "fixture.pdf"
+    # The page text stays server-side, for feedback corrections.
+    assert "source_pages" not in fetched
+    saved = next(iter(deal_repository.deals.values()))
+    assert saved.source_pages[0]["text"].startswith("Deal Name: Fixture Deal")
+    # The run records the same deal id.
+    assert str(run_repository.runs[0].deal_id) == body["deal_id"]
+
+
+def test_a_deal_that_cannot_be_saved_is_a_controlled_error(monkeypatch, deal_repository):
+    def broken_create(deal):
+        raise RuntimeError("connection string with a password")
+
+    monkeypatch.setattr(deal_repository, "create", broken_create)
+    monkeypatch.setattr(main, "extract_repe_deal", lambda pages: REPEDealProfile(deal_name="Fixture Deal"))
+
+    response = TestClient(main.app).post(
+        "/api/h9n/repe/extract",
+        files={"file": ("fixture.pdf", io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")), "application/pdf")},
     )
+
+    assert response.status_code == 502
+    assert "password" not in response.text
+
+
+@pytest.mark.parametrize("deal_id", ["does-not-exist", str(uuid4())])
+def test_get_deal_endpoint_404s_for_an_unknown_id(deal_id):
+    assert TestClient(main.app).get(f"/api/h9n/repe/deals/{deal_id}").status_code == 404
+
+
+# --- Milestone 2.4: corrections ----------------------------------------------
+
+
+def test_a_correction_is_applied_saved_and_recorded(monkeypatch):
+    client = TestClient(main.app)
+    deal_id = _extract(monkeypatch, client, REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000))["deal_id"]
+
+    response = client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 1, "changes": {"asking_price": 950_000}})
 
     assert response.status_code == 200
     body = response.json()
-    assert body["profile"]["deal_name"] == "Fixture Deal"
-    assert body["profile"]["asking_price"] == 1_000_000
-    # Milestone 1, item 4: the extracted deal should be fetchable again by
-    # the id the extract endpoint just returned.
-    deal_id = body["deal_id"]
-    fetch_response = client.get(f"/api/h9n/repe/deals/{deal_id}")
-    assert fetch_response.status_code == 200
-    assert fetch_response.json()["deal_name"] == "Fixture Deal"
+    assert body["version"] == 2
+    assert body["profile"]["asking_price"] == 950_000
+    assert body["profile"]["corrected_fields"] == ["asking_price"]
+    assert client.get(f"/api/h9n/repe/deals/{deal_id}").json()["profile"]["asking_price"] == 950_000
+
+    history = client.get(f"/api/h9n/repe/deals/{deal_id}/history").json()
+    [correction] = history["corrections"]
+    assert correction["field_name"] == "asking_price"
+    assert correction["original_value"] == 1_000_000
+    assert correction["corrected_value"] == 950_000
+    assert correction["source"] == "reviewer"
+    assert correction["corrected_by"] == str(TEST_USER.user_id)
+    assert correction["deal_version"] == 2
+    assert correction["created_at"]
 
 
-def test_get_deal_endpoint_404s_for_an_unknown_id():
+def test_a_correction_keeps_the_evidence_the_original_value_had(deal_repository):
+    cited = REPEDealProfile(asking_price=1_000_000, evidence=[evidence("asking_price", 1_000_000, "Price: $1,000,000")])
+    deal_id = _save_deal(deal_repository, cited)
     client = TestClient(main.app)
-    response = client.get("/api/h9n/repe/deals/does-not-exist")
 
-    assert response.status_code == 404
+    client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 1, "changes": {"asking_price": 950_000}})
+
+    [correction] = client.get(f"/api/h9n/repe/deals/{deal_id}/history").json()["corrections"]
+    assert correction["evidence"]["snippet"] == "Price: $1,000,000"
 
 
-def test_patch_deal_endpoint_applies_a_correction_and_records_it(monkeypatch):
-    def fake_extract_repe_deal(pages):
-        return REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000)
-
-    monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
-
+def test_corrections_are_never_overwritten_by_a_stale_copy(deal_repository):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(asking_price=1_000_000))
     client = TestClient(main.app)
-    extract_response = client.post(
-        "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
+    # Two reviewers open version 1; the first saves.
+    assert client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 1, "changes": {"asking_price": 950_000}}).status_code == 200
+
+    stale = client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 1, "changes": {"asking_price": 900_000}})
+
+    assert stale.status_code == 409
+    assert "Reload" in stale.json()["detail"]
+    assert client.get(f"/api/h9n/repe/deals/{deal_id}").json()["profile"]["asking_price"] == 950_000
+
+
+def test_a_conflict_found_only_when_saving_is_still_a_409(monkeypatch, deal_repository):
+    # Another save lands between reading the deal and saving the change.
+    deal_id = _save_deal(deal_repository, REPEDealProfile(asking_price=1_000_000))
+    real_get = deal_repository.get
+
+    def get_then_someone_else_saves(deal_id, organization_ids):
+        deal = real_get(deal_id, organization_ids)
+        stored = deal_repository.deals[deal.id]
+        deal_repository.deals[deal.id] = stored.model_copy(update={"version": stored.version + 1})
+        return deal
+
+    monkeypatch.setattr(deal_repository, "get", get_then_someone_else_saves)
+
+    response = TestClient(main.app).patch(
+        f"/api/h9n/repe/deals/{deal_id}", json={"version": 1, "changes": {"asking_price": 900_000}}
     )
-    deal_id = extract_response.json()["deal_id"]
 
-    patch_response = client.patch(
-        f"/api/h9n/repe/deals/{deal_id}",
-        json={"asking_price": 950_000},
-    )
+    assert response.status_code == 409
 
-    assert patch_response.status_code == 200
-    body = patch_response.json()
-    assert body["asking_price"] == 950_000
-    assert "asking_price" in body["corrected_fields"]
 
-    # The correction should have actually been saved, not just returned.
-    fetch_response = client.get(f"/api/h9n/repe/deals/{deal_id}")
-    assert fetch_response.json()["asking_price"] == 950_000
+@pytest.mark.parametrize(
+    "changes, message",
+    [
+        ({"not_a_real_field": 123}, "not a field"),
+        ({"asking_price": "about a million"}, "asking_price"),
+        ({"review_status": "approved"}, "can't be changed directly"),
+        ({"corrected_fields": []}, "can't be changed directly"),
+        ({"evidence": []}, "can't be changed directly"),
+        ({}, "at least one field"),
+    ],
+)
+def test_an_invalid_correction_is_a_400_and_changes_nothing(deal_repository, changes, message):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(asking_price=1_000_000))
+    client = TestClient(main.app)
+
+    response = client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 1, "changes": changes})
+
+    assert response.status_code == 400
+    assert message in response.json()["detail"]
+    saved = client.get(f"/api/h9n/repe/deals/{deal_id}").json()
+    assert saved["version"] == 1
+    assert saved["status"] == "draft"
+
+
+def test_a_correction_that_changes_nothing_is_not_recorded(deal_repository):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(asking_price=1_000_000))
+    client = TestClient(main.app)
+
+    response = client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 1, "changes": {"asking_price": 1_000_000}})
+
+    assert response.json()["version"] == 1
+    assert client.get(f"/api/h9n/repe/deals/{deal_id}/history").json()["corrections"] == []
+
+
+def test_a_reviewer_can_dismiss_a_withheld_value(deal_repository):
+    withheld = WithheldValue(field_name="noi", proposed_value=60_000, reason="model_uncertain", detail="x")
+    deal_id = _save_deal(deal_repository, REPEDealProfile(withheld_values=[withheld]))
+    client = TestClient(main.app)
+
+    body = client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 1, "changes": {"withheld_values": []}}).json()
+
+    assert body["profile"]["withheld_values"] == []
+    # Recorded, but not counted as correcting a deal value.
+    assert body["profile"]["corrected_fields"] == []
+    [correction] = client.get(f"/api/h9n/repe/deals/{deal_id}/history").json()["corrections"]
+    assert correction["field_name"] == "withheld_values"
 
 
 def test_patch_deal_endpoint_404s_for_an_unknown_id():
-    client = TestClient(main.app)
-    response = client.patch(
-        "/api/h9n/repe/deals/does-not-exist",
-        json={"asking_price": 1},
+    response = TestClient(main.app).patch(
+        f"/api/h9n/repe/deals/{uuid4()}", json={"version": 1, "changes": {"asking_price": 1}}
     )
 
     assert response.status_code == 404
 
 
-def test_patch_deal_endpoint_rejects_an_unknown_field(monkeypatch):
-    def fake_extract_repe_deal(pages):
-        return REPEDealProfile(deal_name="Fixture Deal")
+# --- Milestone 2.4: review actions -------------------------------------------
 
-    monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
 
+def test_a_deal_moves_from_draft_to_reviewed_to_approved(deal_repository):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(deal_name="Fixture Deal"))
     client = TestClient(main.app)
-    extract_response = client.post(
-        "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
-    )
-    deal_id = extract_response.json()["deal_id"]
 
-    response = client.patch(
-        f"/api/h9n/repe/deals/{deal_id}",
-        json={"not_a_real_field": 123},
-    )
+    reviewed = _review(client, deal_id, "review", 1)
+    approved = _review(client, deal_id, "approve", 2)
+
+    assert reviewed.status_code == 200 and reviewed.json()["status"] == "reviewed"
+    assert approved.status_code == 200 and approved.json()["status"] == "approved"
+    saved = client.get(f"/api/h9n/repe/deals/{deal_id}").json()
+    assert (saved["status"], saved["version"], saved["profile"]["review_status"]) == ("approved", 3, "approved")
+
+    changes = client.get(f"/api/h9n/repe/deals/{deal_id}/history").json()["status_changes"]
+    assert [(c["action"], c["from_status"], c["to_status"], c["deal_version"]) for c in changes] == [
+        ("review", "draft", "reviewed", 2),
+        ("approve", "reviewed", "approved", 3),
+    ]
+    assert all(c["changed_by"] == str(TEST_USER.user_id) for c in changes)
+
+
+def test_a_draft_can_be_approved_directly(deal_repository):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(deal_name="Fixture Deal"))
+
+    assert _review(TestClient(main.app), deal_id, "approve", 1).json()["status"] == "approved"
+
+
+def test_an_approved_deal_is_locked_until_reopened(deal_repository):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(asking_price=1_000_000))
+    client = TestClient(main.app)
+    _review(client, deal_id, "approve", 1)
+
+    locked = client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 2, "changes": {"asking_price": 1}})
+    assert locked.status_code == 409
+    assert "Reopen" in locked.json()["detail"]
+
+    reopened = _review(client, deal_id, "reopen", 2)
+    assert reopened.json()["status"] == "draft"
+    edited = client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 3, "changes": {"asking_price": 1}})
+    assert edited.status_code == 200
+
+
+def test_correcting_a_reviewed_deal_sends_it_back_to_draft(deal_repository):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(asking_price=1_000_000))
+    client = TestClient(main.app)
+    _review(client, deal_id, "review", 1)
+
+    body = client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 2, "changes": {"asking_price": 1}}).json()
+
+    assert body["status"] == "draft"
+    last = client.get(f"/api/h9n/repe/deals/{deal_id}/history").json()["status_changes"][-1]
+    assert (last["action"], last["from_status"], last["to_status"]) == ("edit", "reviewed", "draft")
+
+
+@pytest.mark.parametrize(
+    "actions, then, message",
+    [
+        ([], "reopen", "already a draft"),
+        (["review"], "review", "already marked reviewed"),
+        (["approve"], "approve", "already approved"),
+        (["approve"], "review", "Reopen it"),
+    ],
+)
+def test_a_review_action_that_does_not_apply_is_a_409(deal_repository, actions, then, message):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(deal_name="Fixture Deal"))
+    client = TestClient(main.app)
+    for version, action in enumerate(actions, start=1):
+        _review(client, deal_id, action, version)
+
+    response = _review(client, deal_id, then, len(actions) + 1)
+
+    assert response.status_code == 409
+    assert message in response.json()["detail"]
+
+
+def test_a_review_action_on_a_stale_copy_is_a_409(deal_repository):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(deal_name="Fixture Deal"))
+    client = TestClient(main.app)
+    _review(client, deal_id, "review", 1)
+
+    assert _review(client, deal_id, "approve", 1).status_code == 409
+
+
+def test_an_unknown_review_action_is_a_422():
+    response = _review(TestClient(main.app), uuid4(), "pending", 1)
+
+    assert response.status_code == 422
+
+
+def test_review_endpoint_404s_for_an_unknown_id():
+    assert _review(TestClient(main.app), uuid4(), "approve", 1).status_code == 404
+
+
+def test_reject_needs_feedback(deal_repository):
+    deal_id = _save_deal(deal_repository, REPEDealProfile(deal_name="Fixture Deal"))
+
+    response = _review(TestClient(main.app), deal_id, "reject", 1, feedback="   ")
 
     assert response.status_code == 400
+    assert "what's wrong" in response.json()["detail"]
 
 
-def test_extracted_deal_starts_pending_review(monkeypatch):
-    def fake_extract_repe_deal(pages):
-        return REPEDealProfile(deal_name="Fixture Deal")
-
-    monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
-
-    client = TestClient(main.app)
-    extract_response = client.post(
-        "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
-    )
-
-    assert extract_response.json()["profile"]["review_status"] == "pending"
-
-
-def test_review_endpoint_approves_a_deal(monkeypatch):
-    def fake_extract_repe_deal(pages):
-        return REPEDealProfile(deal_name="Fixture Deal")
-
-    monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
-
-    client = TestClient(main.app)
-    extract_response = client.post(
-        "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
-    )
-    deal_id = extract_response.json()["deal_id"]
-
-    review_response = client.post(
-        f"/api/h9n/repe/deals/{deal_id}/review",
-        json={"status": "approved"},
-    )
-
-    assert review_response.status_code == 200
-    assert review_response.json()["review_status"] == "approved"
-
-    # The verdict should have actually been saved, not just returned.
-    fetch_response = client.get(f"/api/h9n/repe/deals/{deal_id}")
-    assert fetch_response.json()["review_status"] == "approved"
-
-
-def test_review_endpoint_can_reject_a_deal(monkeypatch):
-    def fake_extract_repe_deal(pages):
-        return REPEDealProfile(deal_name="Fixture Deal")
-
-    monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
-
-    client = TestClient(main.app)
-    extract_response = client.post(
-        "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
-    )
-    deal_id = extract_response.json()["deal_id"]
-
-    review_response = client.post(
-        f"/api/h9n/repe/deals/{deal_id}/review",
-        json={"status": "rejected"},
-    )
-
-    assert review_response.status_code == 200
-    assert review_response.json()["review_status"] == "rejected"
-
-
-def test_review_endpoint_rejected_with_feedback_applies_a_correction_and_reopens_for_review(
-    monkeypatch,
-):
-    def fake_extract_repe_deal(pages):
-        return REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000)
-
+def test_reject_with_feedback_applies_a_correction_and_leaves_the_deal_in_draft(monkeypatch):
     def fake_apply_reviewer_feedback(pages, deal, feedback):
+        assert pages[0]["file_name"] == "fixture.pdf"
         assert deal.asking_price == 1_000_000
-        assert "asking price" in feedback
+        assert feedback == "the asking price is wrong"
         return {
             "corrections": {"asking_price": 950_000},
             "updated_evidence": [
@@ -273,201 +391,107 @@ def test_review_endpoint_rejected_with_feedback_applies_a_correction_and_reopens
             "explanation": "The document actually states $950,000.",
         }
 
-    monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
+    client = TestClient(main.app)
+    deal_id = _extract(monkeypatch, client, REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000))["deal_id"]
+    _review(client, deal_id, "review", 1)
     monkeypatch.setattr(main, "apply_reviewer_feedback", fake_apply_reviewer_feedback)
 
+    response = _review(client, deal_id, "reject", 2, feedback="  the asking price is wrong ")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "draft"
+    assert body["version"] == 4  # the rejection, then the correction
+    assert body["profile"]["asking_price"] == 950_000
+    assert body["profile"]["corrected_fields"] == ["asking_price"]
+    assert body["profile"]["review_feedback"] == "the asking price is wrong"
+    assert any(e["value"] == "950000" for e in body["profile"]["evidence"])
+
+    history = client.get(f"/api/h9n/repe/deals/{deal_id}/history").json()
+    assert [(c["action"], c["to_status"], c["note"]) for c in history["status_changes"]][-1] == (
+        "reject",
+        "draft",
+        "the asking price is wrong",
+    )
+    price = next(c for c in history["corrections"] if c["field_name"] == "asking_price")
+    assert (price["source"], price["feedback"], price["original_value"]) == (
+        "reviewer_feedback",
+        "the asking price is wrong",
+        1_000_000,
+    )
+
+
+def test_reject_with_feedback_but_no_derivable_fix_keeps_the_rejection(monkeypatch):
     client = TestClient(main.app)
-    extract_response = client.post(
-        "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
-    )
-    deal_id = extract_response.json()["deal_id"]
-
-    review_response = client.post(
-        f"/api/h9n/repe/deals/{deal_id}/review",
-        json={"status": "rejected", "feedback": "the asking price is wrong"},
+    deal_id = _extract(monkeypatch, client, REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000))["deal_id"]
+    monkeypatch.setattr(
+        main,
+        "apply_reviewer_feedback",
+        lambda pages, deal, feedback: {"corrections": {}, "updated_evidence": [], "explanation": "Not enough information."},
     )
 
-    assert review_response.status_code == 200
-    body = review_response.json()
-    # Applied and recorded like any other correction (Milestone 1, item 4) -
-    # but derived from the reviewer's feedback instead of them PATCH-ing the
-    # exact value themselves.
-    assert body["asking_price"] == 950_000
-    assert "asking_price" in body["corrected_fields"]
-    assert body["review_feedback"] == "the asking price is wrong"
-    assert any(e["value"] == "950000" for e in body["evidence"])
-    # Something changed automatically, so it needs another look rather than
-    # sitting "rejected" as if the correction never happened.
-    assert body["review_status"] == "pending"
+    body = _review(client, deal_id, "reject", 1, feedback="something about this looks off").json()
 
-    # And it was actually persisted, not just returned.
-    fetch_response = client.get(f"/api/h9n/repe/deals/{deal_id}")
-    assert fetch_response.json()["asking_price"] == 950_000
-    assert fetch_response.json()["review_status"] == "pending"
+    assert body["version"] == 2
+    assert body["profile"]["asking_price"] == 1_000_000
+    assert body["profile"]["corrected_fields"] == []
+    assert body["profile"]["review_feedback"] == "something about this looks off"
 
 
-def test_review_endpoint_rejected_with_feedback_but_no_derivable_fix_stays_rejected(monkeypatch):
-    def fake_extract_repe_deal(pages):
-        return REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000)
-
-    def fake_apply_reviewer_feedback(pages, deal, feedback):
-        # Claude looked, but couldn't confidently derive a corrected value.
-        return {"corrections": {}, "updated_evidence": [], "explanation": "Not enough information."}
-
-    monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
-    monkeypatch.setattr(main, "apply_reviewer_feedback", fake_apply_reviewer_feedback)
-
-    client = TestClient(main.app)
-    extract_response = client.post(
-        "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
-    )
-    deal_id = extract_response.json()["deal_id"]
-
-    review_response = client.post(
-        f"/api/h9n/repe/deals/{deal_id}/review",
-        json={"status": "rejected", "feedback": "something about this looks off"},
-    )
-
-    assert review_response.status_code == 200
-    body = review_response.json()
-    assert body["asking_price"] == 1_000_000
-    assert body["corrected_fields"] == []
-    assert body["review_feedback"] == "something about this looks off"
-    # Nothing was auto-corrected, so the rejection stands as submitted.
-    assert body["review_status"] == "rejected"
-
-
-def test_review_endpoint_reports_a_failed_correction_but_keeps_the_rejection(monkeypatch):
+def test_a_failed_feedback_correction_is_reported_but_the_rejection_is_kept(monkeypatch):
     # Milestone 1.1: a correction failure is a controlled error that says
     # what was saved - not a raw 500, and not a silent 200 that hides it.
-    def fake_extract_repe_deal(pages):
-        return REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000)
-
-    def fake_apply_reviewer_feedback(pages, deal, feedback):
+    def unavailable(pages, deal, feedback):
         raise ExtractionUnavailableError("The model provider could not be reached. Try again shortly.")
 
-    monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
-    monkeypatch.setattr(main, "apply_reviewer_feedback", fake_apply_reviewer_feedback)
-
     client = TestClient(main.app)
-    extract_response = client.post(
-        "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
-    )
-    deal_id = extract_response.json()["deal_id"]
+    deal_id = _extract(monkeypatch, client, REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000))["deal_id"]
+    monkeypatch.setattr(main, "apply_reviewer_feedback", unavailable)
 
-    review_response = client.post(
-        f"/api/h9n/repe/deals/{deal_id}/review",
-        json={"status": "rejected", "feedback": "something about this looks off"},
-    )
+    response = _review(client, deal_id, "reject", 1, feedback="something about this looks off")
 
-    assert review_response.status_code == 503
-    assert "rejection and feedback were saved" in review_response.json()["detail"]
+    assert response.status_code == 503
+    assert "rejection and feedback were saved" in response.json()["detail"]
     saved = client.get(f"/api/h9n/repe/deals/{deal_id}").json()
-    assert saved["review_status"] == "rejected"
-    assert saved["review_feedback"] == "something about this looks off"
+    assert saved["version"] == 2
+    assert saved["profile"]["review_feedback"] == "something about this looks off"
 
 
-def test_review_endpoint_rejected_with_feedback_but_no_saved_pages_skips_correction(monkeypatch):
-    # A deal saved without ever going through /extract (e.g. created some
-    # other way) has no source text saved - there's nothing to re-derive a
-    # fix from, so the correction step should be skipped entirely rather
-    # than erroring.
+def test_reject_without_saved_pages_skips_the_correction(monkeypatch, deal_repository):
+    # A deal with no saved source text has nothing to re-derive a fix from.
     def fail_if_called(pages, deal, feedback):
         raise AssertionError("apply_reviewer_feedback should not be called with no saved pages")
 
     monkeypatch.setattr(main, "apply_reviewer_feedback", fail_if_called)
+    deal_id = _save_deal(deal_repository, REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000))
 
-    deal_id = main._review_store.save(REPEDealProfile(deal_name="Fixture Deal", asking_price=1_000_000))
-    main._review_store.save_owner(deal_id, TEST_ORGANIZATION_ID)
+    body = _review(TestClient(main.app), deal_id, "reject", 1, feedback="the asking price is wrong").json()
 
-    client = TestClient(main.app)
-    review_response = client.post(
-        f"/api/h9n/repe/deals/{deal_id}/review",
-        json={"status": "rejected", "feedback": "the asking price is wrong"},
-    )
-
-    assert review_response.status_code == 200
-    body = review_response.json()
-    assert body["asking_price"] == 1_000_000
-    assert body["review_feedback"] == "the asking price is wrong"
-    assert body["review_status"] == "rejected"
+    assert body["profile"]["asking_price"] == 1_000_000
+    assert body["profile"]["review_feedback"] == "the asking price is wrong"
 
 
-def test_review_endpoint_rejected_without_feedback_does_not_call_the_extractor(monkeypatch):
+@pytest.mark.parametrize("action", ["review", "approve"])
+def test_other_review_actions_never_call_the_extractor(monkeypatch, deal_repository, action):
     def fail_if_called(pages, deal, feedback):
-        raise AssertionError("apply_reviewer_feedback should not be called without feedback")
+        raise AssertionError("apply_reviewer_feedback should only run for a rejection")
 
-    def fake_extract_repe_deal(pages):
-        return REPEDealProfile(deal_name="Fixture Deal")
-
-    monkeypatch.setattr(main, "extract_repe_deal", fake_extract_repe_deal)
     monkeypatch.setattr(main, "apply_reviewer_feedback", fail_if_called)
+    deal_id = _save_deal(deal_repository, REPEDealProfile(deal_name="Fixture Deal"), pages=[{"text": "x"}])
 
-    client = TestClient(main.app)
-    extract_response = client.post(
-        "/api/h9n/repe/extract",
-        files={
-            "file": (
-                "fixture.pdf",
-                io.BytesIO(_make_pdf_bytes("Deal Name: Fixture Deal")),
-                "application/pdf",
-            )
-        },
-    )
-    deal_id = extract_response.json()["deal_id"]
-
-    review_response = client.post(
-        f"/api/h9n/repe/deals/{deal_id}/review",
-        json={"status": "rejected"},
-    )
-
-    assert review_response.status_code == 200
-    assert review_response.json()["review_status"] == "rejected"
-    assert review_response.json()["review_feedback"] is None
+    assert _review(TestClient(main.app), deal_id, action, 1, feedback="ignored").status_code == 200
 
 
-def test_review_endpoint_404s_for_an_unknown_id():
-    client = TestClient(main.app)
-    response = client.post(
-        "/api/h9n/repe/deals/does-not-exist/review",
-        json={"status": "approved"},
-    )
+def test_deal_storage_failures_are_controlled_errors(monkeypatch, deal_repository):
+    def broken_get(deal_id, organization_ids):
+        raise RuntimeError("database detail that must not leak")
 
-    assert response.status_code == 404
+    monkeypatch.setattr(deal_repository, "get", broken_get)
 
+    response = TestClient(main.app).get(f"/api/h9n/repe/deals/{uuid4()}")
 
-def test_review_endpoint_rejects_pending_as_a_submitted_status():
-    # "pending" is only ever the default a fresh extraction starts with -
-    # FastAPI/pydantic should reject it before it ever reaches the store,
-    # since ReviewRequest.status only allows "approved" or "rejected".
-    client = TestClient(main.app)
-    response = client.post(
-        "/api/h9n/repe/deals/does-not-exist/review",
-        json={"status": "pending"},
-    )
-
-    assert response.status_code == 422
+    assert response.status_code == 502
+    assert "must not leak" not in response.text
 
 
 # --- Milestone 1.1: controlled errors from the extract endpoint ----------------
@@ -520,7 +544,7 @@ def test_extract_endpoint_rejects_a_pdf_with_no_text(monkeypatch):
         (RuntimeError("internal detail that must not leak"), 500),
     ],
 )
-def test_extract_endpoint_turns_every_failure_into_a_controlled_error(monkeypatch, error, status_code):
+def test_extract_endpoint_turns_every_failure_into_a_controlled_error(monkeypatch, deal_repository, error, status_code):
     def failing_extract(pages):
         raise error
 
@@ -530,7 +554,7 @@ def test_extract_endpoint_turns_every_failure_into_a_controlled_error(monkeypatc
 
     assert response.status_code == status_code
     assert "must not leak" not in response.text
-    assert main._review_store.list_ids() == []
+    assert deal_repository.deals == {}
 
 
 def test_extract_endpoint_hides_configuration_details_from_the_caller(monkeypatch):
@@ -567,10 +591,10 @@ def test_extract_endpoint_returns_and_saves_withheld_values(monkeypatch):
     assert body["profile"]["asking_price"] is None
     assert body["profile"]["withheld_values"][0]["proposed_value"] == 1_000_000
     saved = client.get(f"/api/h9n/repe/deals/{body['deal_id']}").json()
-    assert saved["withheld_values"][0]["reason"] == "no_evidence"
+    assert saved["profile"]["withheld_values"][0]["reason"] == "no_evidence"
 
 
-def test_extract_endpoint_rejects_an_upload_without_a_filename(monkeypatch):
+def test_extract_endpoint_rejects_an_upload_without_a_filename(monkeypatch, deal_repository):
     def fail_if_called(pages):
         raise AssertionError("a nameless upload should never reach extraction")
 
@@ -584,17 +608,17 @@ def test_extract_endpoint_rejects_an_upload_without_a_filename(monkeypatch):
     # FastAPI treats a nameless upload as a missing file - a clean 422, not a
     # crash on file.filename being None.
     assert response.status_code == 422
-    assert main._review_store.list_ids() == []
+    assert deal_repository.deals == {}
 
 
-def test_extract_endpoint_rejects_an_oversized_upload_without_reading_it_all(monkeypatch):
+def test_extract_endpoint_rejects_an_oversized_upload_without_reading_it_all(monkeypatch, deal_repository):
     monkeypatch.setattr(main, "MAX_UPLOAD_BYTES", 1_000)
     monkeypatch.setattr(main, "extract_repe_deal", lambda pages: pytest.fail("should not extract"))
 
     response = _post_pdf(TestClient(main.app), b"%PDF-1.7" + b"0" * 5_000)
 
     assert response.status_code == 413
-    assert main._review_store.list_ids() == []
+    assert deal_repository.deals == {}
 
 
 def test_an_unexpected_extraction_failure_is_logged(monkeypatch, caplog):
@@ -615,16 +639,13 @@ def test_an_unexpected_extraction_failure_is_logged(monkeypatch, caplog):
 _FEEDBACK_PAGES = [{"file_name": "fixture.pdf", "page_number": 1, "text": "Asking Price: $950,000\nNOI: $65,000"}]
 
 
-def _saved_deal_for_feedback() -> str:
+def _saved_deal_for_feedback(deal_repository) -> str:
     deal = REPEDealProfile(
         deal_name="Fixture Deal",
         asking_price=1_000_000,
         withheld_values=[WithheldValue(field_name="noi", proposed_value=60_000, reason="model_uncertain", detail="x")],
     )
-    deal_id = main._review_store.save(deal)
-    main._review_store.save_pages(deal_id, _FEEDBACK_PAGES)
-    main._review_store.save_owner(deal_id, TEST_ORGANIZATION_ID)
-    return deal_id
+    return _save_deal(deal_repository, deal, pages=_FEEDBACK_PAGES)
 
 
 def _claude_answers(monkeypatch, *responses, error=None):
@@ -638,41 +659,39 @@ def _claude_answers(monkeypatch, *responses, error=None):
 
 
 def _reject(deal_id):
-    return TestClient(main.app, raise_server_exceptions=False).post(
-        f"/api/h9n/repe/deals/{deal_id}/review", json={"status": "rejected", "feedback": "the price is wrong"}
-    )
+    return _review(TestClient(main.app, raise_server_exceptions=False), deal_id, "reject", 1, "the price is wrong")
 
 
 def _correction(corrections, updated_evidence=()):
     return tool_response({"corrections": corrections, "updated_evidence": list(updated_evidence), "explanation": "x"})
 
 
-def test_a_verified_feedback_correction_is_applied(monkeypatch):
+def test_a_verified_feedback_correction_is_applied(monkeypatch, deal_repository):
     citation = evidence("asking_price", 950_000, "Asking Price: $950,000")
     _claude_answers(monkeypatch, _correction({"asking_price": 950_000}, [citation]))
-    deal_id = _saved_deal_for_feedback()
+    deal_id = _saved_deal_for_feedback(deal_repository)
 
     body = _reject(deal_id).json()
 
-    assert body["asking_price"] == 950_000
-    assert body["evidence"][0]["snippet"] == "Asking Price: $950,000"
-    assert body["corrected_fields"] == ["asking_price"]
-    assert body["review_status"] == "pending"
+    assert body["profile"]["asking_price"] == 950_000
+    assert body["profile"]["evidence"][0]["snippet"] == "Asking Price: $950,000"
+    assert body["profile"]["corrected_fields"] == ["asking_price"]
+    assert body["status"] == "draft"
 
 
-def test_an_uncited_feedback_correction_is_withheld_not_applied(monkeypatch):
+def test_an_uncited_feedback_correction_is_withheld_not_applied(monkeypatch, deal_repository):
     _claude_answers(monkeypatch, _correction({"asking_price": 99_999_999}))
-    deal_id = _saved_deal_for_feedback()
+    deal_id = _saved_deal_for_feedback(deal_repository)
 
     body = _reject(deal_id).json()
 
-    assert body["asking_price"] == 1_000_000
-    assert body["corrected_fields"] == []
-    assert [(w["field_name"], w["reason"]) for w in body["withheld_values"]] == [
+    assert body["profile"]["asking_price"] == 1_000_000
+    assert body["profile"]["corrected_fields"] == []
+    assert [(w["field_name"], w["reason"]) for w in body["profile"]["withheld_values"]] == [
         ("noi", "model_uncertain"),
         ("asking_price", "no_evidence"),
     ]
-    assert body["review_status"] == "pending"
+    assert body["status"] == "draft"
 
 
 @pytest.mark.parametrize(
@@ -682,26 +701,27 @@ def test_an_uncited_feedback_correction_is_withheld_not_applied(monkeypatch):
         pytest.param({"withheld_values": [], "evidence": []}, id="erase the review queue"),
     ],
 )
-def test_a_bad_feedback_correction_is_a_controlled_error_and_changes_nothing(monkeypatch, corrections):
+def test_a_bad_feedback_correction_is_a_controlled_error_and_changes_nothing(monkeypatch, deal_repository, corrections):
     _claude_answers(monkeypatch, _correction(corrections), _correction(corrections))
-    deal_id = _saved_deal_for_feedback()
+    deal_id = _saved_deal_for_feedback(deal_repository)
 
     response = _reject(deal_id)
 
     assert response.status_code == 502
     assert "rejection and feedback were saved" in response.json()["detail"]
-    saved = main._review_store.get(deal_id)
-    assert saved.asking_price == 1_000_000
-    assert [w.field_name for w in saved.withheld_values] == ["noi"]
-    assert saved.review_status == "rejected"
+    saved = next(iter(deal_repository.deals.values()))
+    assert saved.profile.asking_price == 1_000_000
+    assert [w.field_name for w in saved.profile.withheld_values] == ["noi"]
+    assert saved.profile.review_feedback == "the price is wrong"
+    assert saved.version == 2
 
 
-def test_a_provider_outage_during_feedback_is_a_controlled_error(monkeypatch):
+def test_a_provider_outage_during_feedback_is_a_controlled_error(monkeypatch, deal_repository):
     request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     _claude_answers(monkeypatch, error=anthropic.APIConnectionError(request=request))
-    deal_id = _saved_deal_for_feedback()
+    deal_id = _saved_deal_for_feedback(deal_repository)
 
     response = _reject(deal_id)
 
     assert response.status_code == 503
-    assert main._review_store.get(deal_id).review_status == "rejected"
+    assert next(iter(deal_repository.deals.values())).profile.review_feedback == "the price is wrong"

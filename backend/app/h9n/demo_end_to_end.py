@@ -10,17 +10,16 @@ deal package:
   2. Extracts a validated REPEDealProfile (item 1's extract_repe_deal()).
   3. Prints the source evidence for each important field (item 2).
   4. Prints anything flagged as missing, conflicting, or uncertain (item 3).
-  5. Saves the deal to the review store and fetches it back by id, applies
-     one example correction to show it taking effect and being recorded in
-     corrected_fields, then actually PAUSES and asks whoever is running this
-     to look at everything printed above and type whether it's correct -
-     that answer is recorded as an "approved"/"rejected" review_status
-     verdict (item 4's "Approve and save the validated Deal Profile" step).
-     Answering "n" pauses again to ask *what's* wrong, in plain language -
-     that feedback is sent to Claude along with the original document text
-     to re-derive and apply the corrected field(s) automatically, putting
-     the deal back to "pending" for another look (rather than the reviewer
-     having to work out and PATCH the exact value themselves).
+  5. Saves the deal (in memory - the API saves to Supabase, Milestone 2.4)
+     and fetches it back by id, applies one example correction to show it
+     being recorded with its original value, then actually PAUSES and asks
+     whoever is running this to look at everything printed above and type
+     whether it's correct. "y" approves the deal (item 4's "Approve and save
+     the validated Deal Profile" step). "n" rejects it and asks *what's*
+     wrong, in plain language - that feedback is sent to Claude along with
+     the original document text to re-derive and apply the corrected
+     field(s) automatically, leaving the deal in draft for another look
+     (rather than the reviewer having to work out the exact value).
   6. Runs the ground-truth and holdout evaluation suites and prints their
      accuracy reports (items 5-7).
 
@@ -49,6 +48,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 from backend.app.h9n.extraction.repe_extractor import (
     apply_reviewer_feedback,
@@ -56,7 +56,9 @@ from backend.app.h9n.extraction.repe_extractor import (
     feedback_updates,
 )
 from backend.app.h9n.ingestion.pdf_reader import read_pdf
-from backend.app.h9n.review.store import DealStore
+from backend.app.h9n.review.models import NewDeal
+from backend.app.h9n.review.repository import InMemoryDealRepository
+from backend.app.h9n.review.workflow import plan_corrections, plan_review_action
 from backend.evaluation.cases import GROUND_TRUTH_CASES, HOLDOUT_CASES
 from backend.evaluation.evaluate import format_report, run_evaluation
 
@@ -104,29 +106,40 @@ def main() -> None:
     print(f"Withheld:    {[(w.field_name, w.proposed_value, w.reason) for w in deal.withheld_values] or '(none)'}")
 
     _section("ITEM 4 - HUMAN REVIEW AND CORRECTION")
-    store = DealStore()
-    deal_id = store.save(deal)
-    # So a rejection below can have Claude re-derive a fix from the actual
-    # document text, instead of only accepting a value the reviewer already
-    # worked out themselves.
-    store.save_pages(deal_id, pages)
-    print(f"Saved deal with id: {deal_id}")
+    deals = InMemoryDealRepository()
+    # Stand-ins for the signed-in reviewer and their organization, which the
+    # API takes from the sign-in token.
+    reviewer, organization = uuid4(), uuid4()
+    saved = deals.create(
+        NewDeal(
+            id=uuid4(),
+            organization_id=organization,
+            profile=deal,
+            source_filename=Path(file_path).name,
+            # So a rejection below can have Claude re-derive a fix from the
+            # actual document text, instead of only accepting a value the
+            # reviewer already worked out themselves.
+            source_pages=pages,
+            created_by=reviewer,
+        )
+    )
+    print(f"Saved deal with id: {saved.id}")
 
-    fetched = store.get(deal_id)
-    print(f"Fetched it back by id - deal_name matches: {fetched.deal_name == deal.deal_name}")
-
-    print(f"review_status right after extraction: {fetched.review_status!r}")
+    fetched = deals.get(saved.id, [organization])
+    print(f"Fetched it back by id - deal_name matches: {fetched.profile.deal_name == deal.deal_name}")
+    print(f"Status right after extraction: {fetched.status!r} (version {fetched.version})")
 
     if deal.asking_price is not None:
         # A token example correction (nudge the price down by $1) just to
         # demonstrate the mechanism - not a real reviewer judgment call.
-        example_correction = deal.asking_price - 1
-        corrected = store.apply_corrections(deal_id, {"asking_price": example_correction})
+        changes = plan_corrections(fetched, {"asking_price": deal.asking_price - 1}, actor=reviewer)
+        fetched = deals.save(fetched, changes, expected_version=fetched.version)
+        [correction] = deals.history(fetched).corrections
         print(
             f"Applied an example correction: asking_price "
-            f"{deal.asking_price} -> {corrected.asking_price}"
+            f"{correction.original_value} -> {correction.corrected_value} (kept in the deal's history)"
         )
-        print(f"corrected_fields now shows: {corrected.corrected_fields}")
+        print(f"corrected_fields now shows: {fetched.profile.corrected_fields}")
     else:
         print("(skipped the example correction - asking_price wasn't extracted for this document)")
 
@@ -144,48 +157,53 @@ def main() -> None:
     except EOFError:
         # No interactive terminal attached (e.g. output piped somewhere) -
         # skip rather than crash after all the API calls already made above.
-        print("(no input available - leaving review_status as 'pending')")
+        print("(no input available - leaving the deal in draft)")
     else:
-        status = "approved" if answer in ("y", "yes") else "rejected"
-        reviewed = store.set_review_status(deal_id, status)
-        print(f"Reviewer verdict recorded: review_status is now {reviewed.review_status!r}")
-
-        if status == "rejected":
+        if answer in ("y", "yes"):
+            fetched = deals.save(
+                fetched, plan_review_action(fetched, "approve", actor=reviewer), expected_version=fetched.version
+            )
+            print(f"Approved: status is now {fetched.status!r}")
+        else:
             # This is the part a bare y/n verdict can't do on its own: let
             # the reviewer actually say what's wrong, in their own words,
             # instead of just flagging that *something* is.
             try:
-                feedback = input(
-                    "What's wrong with it? (describe the field(s) to fix, "
-                    "or press enter to skip): "
-                ).strip()
+                feedback = input("What's wrong with it? (describe the field(s) to fix): ").strip()
             except EOFError:
                 feedback = ""
 
             if not feedback:
-                print("(no feedback given - leaving review_status as 'rejected')")
+                print("(no feedback given - leaving the deal in draft)")
             else:
-                reviewed = store.apply_corrections(deal_id, {"review_feedback": feedback})
-                print("Asking Claude to re-derive a fix from the original document text...")
+                fetched = deals.save(
+                    fetched,
+                    plan_review_action(fetched, "reject", actor=reviewer, feedback=feedback),
+                    expected_version=fetched.version,
+                )
+                print("Rejection recorded. Asking Claude to re-derive a fix from the original document text...")
                 try:
-                    result = apply_reviewer_feedback(pages, reviewed, feedback)
+                    result = apply_reviewer_feedback(pages, fetched.profile, feedback)
                 except ValueError as exc:
                     print(f"(couldn't derive a correction from that feedback: {exc})")
                 else:
                     print(f"Explanation: {result['explanation']}")
-                    updates = feedback_updates(reviewed, result)
-                    if not updates:
+                    updates = feedback_updates(fetched.profile, result)
+                    changes = updates and plan_corrections(
+                        fetched, updates, actor=reviewer, source="reviewer_feedback", feedback=feedback
+                    )
+                    if not changes:
                         print("(Claude didn't find a field it could confidently correct)")
                     else:
-                        # Verified corrections, their citations, any unverified
-                        # proposals (withheld), and back to "pending" for
-                        # another look - the same single update the API applies.
-                        reviewed = store.apply_corrections(deal_id, updates)
+                        # Verified corrections, their citations, and any
+                        # unverified proposals (withheld) - the same update
+                        # the API applies.
+                        fetched = deals.save(fetched, changes, expected_version=fetched.version)
                         print(f"Applied correction: {result['corrections'] or '(none verified)'}")
                         if result["withheld"]:
                             print(f"Withheld (couldn't verify): {[w.field_name for w in result['withheld']]}")
-                        print(f"corrected_fields now shows: {reviewed.corrected_fields}")
-                        print(f"review_status is now {reviewed.review_status!r} (ready for another look)")
+                        print(f"corrected_fields now shows: {fetched.profile.corrected_fields}")
+                        print(f"Status is now {fetched.status!r} (ready for another look)")
 
     _section("ITEMS 5-7 - GROUND-TRUTH AND HOLDOUT EVALUATION")
     print(format_report(run_evaluation(GROUND_TRUTH_CASES), label="Ground truth (item 5)"))

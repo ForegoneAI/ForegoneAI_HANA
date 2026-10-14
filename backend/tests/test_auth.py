@@ -6,7 +6,7 @@ signed-in users are accepted, and that a user from one organization cannot
 reach another organization's deals.
 """
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pymupdf
 import pytest
@@ -22,7 +22,7 @@ from backend.app.h9n.auth import (
     resolve_organization,
 )
 from backend.app.h9n.rag.config import RagConfigurationError, RagSettings
-from backend.app.h9n.review.store import DealStore
+from backend.app.h9n.review.models import NewDeal
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 from backend.tests.auth_fakes import OTHER_ORGANIZATION_ID, TEST_ORGANIZATION_ID, user_in
 
@@ -123,12 +123,26 @@ def test_memberships_are_looked_up_for_active_rows_only():
 # --- The get_current_user dependency, end to end ----------------------------
 
 
+def _save_deal(deal_repository, organization_id, profile, *, pages=None) -> str:
+    return str(
+        deal_repository.create(
+            NewDeal(
+                id=uuid4(),
+                organization_id=organization_id,
+                profile=profile,
+                source_filename="x.pdf",
+                source_pages=pages,
+                created_by=USER_ID,
+            )
+        ).id
+    )
+
+
 @pytest.fixture
-def real_sign_in(tmp_path, monkeypatch):
+def real_sign_in(monkeypatch):
     """Use the real get_current_user (not conftest's signed-in stand-in), backed
     by a fake Supabase that recognises the token "valid-token"."""
     main.app.dependency_overrides.pop(get_current_user)
-    monkeypatch.setattr(main, "_review_store", DealStore(tmp_path / "reviews"))
 
     class FakeAuthService:
         def verify_token(self, token):
@@ -156,16 +170,15 @@ def test_protected_routes_reject_callers_who_are_not_signed_in(real_sign_in, hea
     assert response.headers["www-authenticate"] == "Bearer"
 
 
-def test_a_signed_in_user_reaches_their_own_organizations_deal(real_sign_in):
-    deal_id = main._review_store.save(REPEDealProfile(deal_name="Ours"))
-    main._review_store.save_owner(deal_id, TEST_ORGANIZATION_ID)
+def test_a_signed_in_user_reaches_their_own_organizations_deal(real_sign_in, deal_repository):
+    deal_id = _save_deal(deal_repository, TEST_ORGANIZATION_ID, REPEDealProfile(deal_name="Ours"))
 
     response = TestClient(main.app).get(
         f"/api/h9n/repe/deals/{deal_id}", headers={"Authorization": "Bearer valid-token"}
     )
 
     assert response.status_code == 200
-    assert response.json()["deal_name"] == "Ours"
+    assert response.json()["profile"]["deal_name"] == "Ours"
 
 
 def test_missing_supabase_configuration_is_a_503(monkeypatch):
@@ -214,40 +227,49 @@ def test_with_no_organization_requested_an_ambiguous_user_is_refused(organizatio
 
 
 @pytest.fixture
-def other_organizations_deal(tmp_path, monkeypatch) -> str:
-    monkeypatch.setattr(main, "_review_store", DealStore(tmp_path / "reviews"))
-    deal_id = main._review_store.save(REPEDealProfile(deal_name="Theirs", asking_price=1_000_000))
-    main._review_store.save_owner(deal_id, OTHER_ORGANIZATION_ID)
-    main._review_store.save_pages(deal_id, [{"file_name": "x.pdf", "page_number": 1, "text": "x"}])
-    return deal_id
+def other_organizations_deal(deal_repository) -> str:
+    return _save_deal(
+        deal_repository,
+        OTHER_ORGANIZATION_ID,
+        REPEDealProfile(deal_name="Theirs", asking_price=1_000_000),
+        pages=[{"file_name": "x.pdf", "page_number": 1, "text": "x"}],
+    )
 
 
-def test_another_organizations_deal_looks_like_it_does_not_exist(other_organizations_deal):
+def test_another_organizations_deal_looks_like_it_does_not_exist(other_organizations_deal, deal_repository):
     client = TestClient(main.app)
     deal_id = other_organizations_deal
 
     responses = [
         client.get(f"/api/h9n/repe/deals/{deal_id}"),
-        client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"asking_price": 1}),
-        client.post(f"/api/h9n/repe/deals/{deal_id}/review", json={"status": "approved"}),
+        client.get(f"/api/h9n/repe/deals/{deal_id}/history"),
+        client.patch(f"/api/h9n/repe/deals/{deal_id}", json={"version": 1, "changes": {"asking_price": 1}}),
+        client.post(f"/api/h9n/repe/deals/{deal_id}/review", json={"action": "approve", "version": 1}),
+        client.post(
+            f"/api/h9n/repe/deals/{deal_id}/review", json={"action": "reject", "version": 1, "feedback": "x"}
+        ),
     ]
 
-    assert [response.status_code for response in responses] == [404, 404, 404]
+    assert [response.status_code for response in responses] == [404] * 5
+    # Same message as a deal that doesn't exist, and nothing of theirs leaks.
+    assert {response.json()["detail"] for response in responses} == {"No deal found with that id."}
+    assert all("Theirs" not in response.text for response in responses)
     # Nothing was changed by the refused requests.
-    saved = main._review_store.get(deal_id)
-    assert saved.asking_price == 1_000_000
-    assert saved.review_status == "pending"
+    saved = next(iter(deal_repository.deals.values()))
+    assert saved.profile.asking_price == 1_000_000
+    assert (saved.status, saved.version) == ("draft", 1)
+    assert deal_repository.history(saved).corrections == []
 
 
-def test_a_deal_saved_without_an_owner_is_not_served(tmp_path, monkeypatch):
-    monkeypatch.setattr(main, "_review_store", DealStore(tmp_path / "reviews"))
-    deal_id = main._review_store.save(REPEDealProfile(deal_name="Legacy"))
+def test_another_organizations_deal_is_not_listed(other_organizations_deal, deal_repository):
+    ours = _save_deal(deal_repository, TEST_ORGANIZATION_ID, REPEDealProfile(deal_name="Ours"))
 
-    assert TestClient(main.app).get(f"/api/h9n/repe/deals/{deal_id}").status_code == 404
+    listed = TestClient(main.app).get("/api/h9n/repe/deals").json()
+
+    assert [row["deal_id"] for row in listed] == [ours]
 
 
-def test_an_extracted_deal_belongs_to_the_organization_it_was_extracted_for(tmp_path, monkeypatch):
-    monkeypatch.setattr(main, "_review_store", DealStore(tmp_path / "reviews"))
+def test_an_extracted_deal_belongs_to_the_organization_it_was_extracted_for(monkeypatch, deal_repository):
     monkeypatch.setattr(main, "extract_repe_deal", lambda pages: REPEDealProfile(deal_name="Fresh"))
     doc = pymupdf.open()
     doc.new_page().insert_text((72, 72), "Deal Name: Fresh")
@@ -259,5 +281,6 @@ def test_an_extracted_deal_belongs_to_the_organization_it_was_extracted_for(tmp_
     )
 
     assert response.status_code == 200
-    assert main._review_store.owner_of(response.json()["deal_id"]) == TEST_ORGANIZATION_ID
-    assert main._review_store.list_ids() == [response.json()["deal_id"]]
+    [saved] = deal_repository.deals.values()
+    assert str(saved.id) == response.json()["deal_id"]
+    assert saved.organization_id == TEST_ORGANIZATION_ID
