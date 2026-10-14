@@ -33,10 +33,22 @@ export interface DealProfile {
 /** One row of GET /api/h9n/repe/deals. */
 export interface DealSummary {
   deal_id: string;
+  organization_id: string;
   deal_name: string | null;
   property_name: string | null;
   review_status: ReviewStatus;
   saved_at: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+}
+
+/** GET /api/h9n/me: who is signed in and which organizations they may act for. */
+export interface CurrentUser {
+  user_id: string;
+  organizations: Organization[];
 }
 
 export interface ExtractResponse {
@@ -92,16 +104,22 @@ function parseJson(text: string): unknown {
  *
  * Uses XMLHttpRequest rather than fetch because fetch can't report upload
  * progress. onUploaded fires when the file has been fully sent, which is
- * when the API starts reading and extracting it.
+ * when the API starts reading and extracting it. organizationId is only
+ * needed for a member of several organizations (see getCurrentUser).
  */
 export async function uploadDeal(
   file: File,
-  handlers: { onProgress?: (fraction: number) => void; onUploaded?: () => void } = {},
+  options: {
+    organizationId?: string;
+    onProgress?: (fraction: number) => void;
+    onUploaded?: () => void;
+  } = {},
 ): Promise<ExtractResponse> {
   const url = apiUrl("/api/h9n/repe/extract");
   const token = await accessToken();
   const form = new FormData();
   form.append("file", file, file.name);
+  if (options.organizationId) form.append("organization_id", options.organizationId);
 
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
@@ -109,9 +127,9 @@ export async function uploadDeal(
     request.setRequestHeader("Authorization", `Bearer ${token}`);
 
     request.upload.onprogress = (event) => {
-      if (event.lengthComputable) handlers.onProgress?.(event.loaded / event.total);
+      if (event.lengthComputable) options.onProgress?.(event.loaded / event.total);
     };
-    request.upload.onload = () => handlers.onUploaded?.();
+    request.upload.onload = () => options.onUploaded?.();
 
     request.onload = () => {
       const body = parseJson(request.responseText);
@@ -150,4 +168,9 @@ export function listDeals(): Promise<DealSummary[]> {
 /** Fetches a saved deal from GET /api/h9n/repe/deals/{id}. */
 export function getDeal(dealId: string): Promise<DealProfile> {
   return getJson<DealProfile>(`/api/h9n/repe/deals/${encodeURIComponent(dealId)}`);
+}
+
+/** Fetches the signed-in user and their organizations from GET /api/h9n/me. */
+export function getCurrentUser(): Promise<CurrentUser> {
+  return getJson<CurrentUser>("/api/h9n/me");
 }

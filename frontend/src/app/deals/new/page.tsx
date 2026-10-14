@@ -1,12 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type DragEvent } from "react";
 
 import { Button, ButtonLink } from "@/components/Button";
 import { Notice } from "@/components/Notice";
 import { RequireSignIn } from "@/components/RequireSignIn";
-import { ApiError, uploadDeal, type ExtractResponse } from "@/lib/api";
+import { ApiError, getCurrentUser, uploadDeal, type ExtractResponse, type Organization } from "@/lib/api";
+import { uploadTarget } from "@/lib/organizations";
 import { formatBytes, validatePdf } from "@/lib/upload";
 
 type Stage =
@@ -37,8 +38,26 @@ function UploadDeal() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>({ name: "idle" });
   const [dragging, setDragging] = useState(false);
+  // undefined while loading; null if they couldn't be loaded, in which case
+  // the upload goes ahead and the API says if it needs an organization.
+  const [organizations, setOrganizations] = useState<Organization[] | null | undefined>(undefined);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    getCurrentUser()
+      .then((user) => setOrganizations(user.organizations))
+      .catch((caught) => {
+        if (caught instanceof ApiError && caught.status === 401) {
+          router.replace(`/login?next=${encodeURIComponent("/deals/new")}`);
+          return;
+        }
+        setOrganizations(null);
+      });
+  }, [router]);
 
   const busy = stage.name === "uploading" || stage.name === "processing";
+  const target = uploadTarget(organizations ?? null, organizationId);
+  const canStart = organizations !== undefined && target.kind === "ready";
 
   function choose(chosen: File | undefined) {
     if (!chosen || busy) return;
@@ -54,10 +73,11 @@ function UploadDeal() {
   }
 
   async function start() {
-    if (!file || fileError) return;
+    if (!file || fileError || target.kind !== "ready") return;
     setStage({ name: "uploading", fraction: 0 });
     try {
       const result = await uploadDeal(file, {
+        organizationId: target.organizationId,
         onProgress: (fraction) => setStage({ name: "uploading", fraction }),
         onUploaded: () => setStage({ name: "processing" }),
       });
@@ -79,6 +99,32 @@ function UploadDeal() {
         Upload a text-based PDF (CIM or offering memorandum). HANA extracts a Deal Profile with page
         citations for you to review.
       </p>
+
+      {target.kind === "none" && (
+        <Notice tone="error">
+          Your account isn&apos;t a member of any organization yet, so deals can&apos;t be uploaded. Ask your
+          administrator to add you.
+        </Notice>
+      )}
+
+      {organizations && organizations.length > 1 && (
+        <div className="field">
+          <label htmlFor="organization">Organization</label>
+          <select
+            id="organization"
+            value={organizationId ?? ""}
+            disabled={busy}
+            onChange={(event) => setOrganizationId(event.target.value || null)}
+          >
+            <option value="">Choose who this deal is for…</option>
+            {organizations.map((organization) => (
+              <option key={organization.id} value={organization.id}>
+                {organization.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <label
         className={`dropzone${dragging ? " dropzone--active" : ""}`}
@@ -105,9 +151,12 @@ function UploadDeal() {
             {file.name} <span className="muted">· {formatBytes(file.size)}</span>
           </span>
           {stage.name !== "done" && (
-            <Button onClick={start} disabled={busy || Boolean(fileError)}>
-              {stage.name === "failed" ? "Try again" : "Extract deal"}
-            </Button>
+            <span className="file-row__action">
+              {target.kind === "choose" && <span className="muted">Choose an organization first</span>}
+              <Button onClick={start} disabled={busy || Boolean(fileError) || !canStart}>
+                {stage.name === "failed" ? "Try again" : "Extract deal"}
+              </Button>
+            </span>
           )}
         </div>
       )}

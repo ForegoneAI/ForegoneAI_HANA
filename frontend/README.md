@@ -10,7 +10,7 @@ This is separate from `site/`, the public marketing site, which is plain HTML pu
 |---|---|
 | `/login` | Email and password sign-in through Supabase Auth |
 | `/deals` | Every deal your organization has saved, newest first, to reopen one. `/` redirects here |
-| `/deals/new` | Upload a PDF and follow it through uploading → extracting → ready (M2.1) |
+| `/deals/new` | Upload a PDF and follow it through uploading → extracting → ready (M2.1). A member of several organizations first chooses which one the deal is for (M2.5) |
 | `/deals/[id]` | The deal workspace. Shows the key extracted values for now; the review form (M2.2) replaces it |
 
 Pages other than `/login` send visitors who aren't signed in to `/login`, then back. That redirect is for convenience. The real protection is the API itself, which rejects any request without a valid session token (M2.5).
@@ -61,4 +61,5 @@ GitHub runs all three on every pull request that touches `frontend/` (`.github/w
 - `src/lib/api.ts`: calls to the H9N API, adding the session token and turning API errors into plain messages
 - `src/lib/supabase.ts`: the browser Supabase client
 - `src/lib/upload.ts`: checks a chosen file before uploading (PDF, 50 MB limit)
+- `src/lib/organizations.ts`: which organization an upload is for, and whether the user must choose one
 - `src/lib/deals.ts`: how a deal's title, review status and save time read in the app
