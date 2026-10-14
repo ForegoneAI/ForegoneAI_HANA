@@ -429,6 +429,104 @@ the profile, and its page-level evidence. The response's `extraction_run_id` poi
   `20260929_create_h9n_extraction_runs.sql`, and set the Supabase variables in `.env` (see
   [RAG.md](./RAG.md)). The migration's comments describe each table and column.
 
+### Investment mandates (Milestone 3.1)
+
+A **mandate** is a fund's explicit screening criteria, saved per organization in Supabase so a
+deal can later be screened against it (M3.2). It's a small editable form, defined in
+`app/h9n/screening/mandate.py`:
+
+| Section | Example | Checked against (Deal Profile field) |
+|---|---|---|
+| `asset_types` | `["Multifamily"]` | `property_type` |
+| `target_markets` / `excluded_markets` | `["Austin", "Phoenix"]` | `market`, else `submarket`, `location`, `address` |
+| `deal_size` | `{"min": 5000000, "max": 50000000}` | `asking_price` |
+| `key_metrics` | `{"cap_rate": {"min": 5.5}}` | the field of the same name |
+| `leverage` | `{"max_ltv": 65}` | `ltv`, `interest_rate` |
+| `preferences` | `["Value-add business plan"]` | nothing - soft, shown to reviewers only |
+
+Units match the Deal Profile: dollars, and percentages as numbers (6.5 means 6.5%); unit counts and
+years must be whole numbers. Empty sections mean "no requirement", but a mandate needs at least one
+hard criterion. Invalid mandates (min above max, a 550% cap rate, 10.5 units, `true` as a number, a
+limit above a trillion, a market both targeted and excluded, an unknown market) are rejected with a
+422 and never saved.
+
+**Property types and markets come from fixed lists** (`app/h9n/screening/vocabulary.py`; also
+`GET /api/h9n/mandates/vocabulary`), read at two levels of strictness:
+
+- **Mandate entries are strict.** Only a canonical name or an exact alias is accepted ("Apartments"
+  -> `Multifamily`, "DFW" or "Dallas, TX" -> `Dallas-Fort Worth`). Anything else - including
+  "Office and Retail" or "Dallas and Houston" - is a 422 naming the entry, so a criterion is never
+  silently dropped.
+- **Deal data is read loosely.** `profile_asset_type()` and `profile_market_match()` find the type or
+  market inside longer wording ("Garden-style apartment community", "12 Elm St, Plano, TX").
+  `profile_market_match()` also says which field the market came from and how sure it is:
+  `"exact"`, or `"partial"` when it was only found as a word inside a longer name ("Uptown Dallas",
+  "Brooklyn Park"). **M3.2 should show the matched market and field to the reviewer, and treat a
+  partial match or an unknown market as "needs review", not as a pass or fail.**
+
+Wording it can't place confidently is unknown, never a guess: a city in another state or country
+("Portland, ME", "Buffalo, New York", "St. Petersburg, Russia" - only the last part of a location
+is checked for a country, so "12 Ireland Rd, Austin, TX" still matches), or an abbreviation inside a
+longer name ("DC Ranch"). A bare "Flex" isn't accepted as a mandate entry; say "Industrial" or
+"Flex office". For property types the main noun wins ("Office building with ground-floor retail"
+is `Office`), and a bare "land" only counts when nothing else matches. To add a market, add one line
+(its states and aliases) to `_MARKETS`; an alias listed for two markets fails at startup. Renaming or
+removing a canonical name makes saved mandates that use it unreadable, so pair that with a
+`CRITERIA_SCHEMA_VERSION` bump and a migration.
+
+Routes (internal API key and `?organization_id=` required, like run recording above):
+
+```bash
+# Create
+curl -X POST "http://localhost:8000/api/h9n/mandates?organization_id=$ORG" \
+  -H "X-H9N-API-Key: $H9N_RAG_INTERNAL_API_KEY" -H "Content-Type: application/json" \
+  -d '{"name": "Core Office", "criteria": {"asset_types": ["Office"], "leverage": {"max_ltv": 60}}}'
+
+# List active mandates (add &include_archived=true for all) -> {"mandates": [...], "skipped": n}
+# fetch, edit, archive
+GET  /api/h9n/mandates?organization_id=...
+GET  /api/h9n/mandates/{id}?organization_id=...
+PUT  /api/h9n/mandates/{id}?organization_id=...          # the fetched mandate, edited (keeps its "version")
+POST /api/h9n/mandates/{id}/archive?organization_id=...
+
+# Select one for screening (409 if archived)
+GET  /api/h9n/mandates/{id}/for-screening?organization_id=...
+```
+
+Things that aren't obvious:
+
+- **Edits name the version they started from.** Every edit bumps `version` (archiving doesn't);
+  an edit based on an older version gets a 409 instead of silently overwriting someone else's
+  change. Screening results should store the mandate `version` they used.
+- **An edit is the whole mandate.** PUT needs every field (`name`, `description` - `null` to
+  clear it - `criteria`, `is_demo`, `version`). A fetched mandate can be sent straight back: its
+  read-only fields (`id`, `organization_id`, `created_at`, `updated_at`, `is_archived`) are
+  ignored. Any other unknown field, such as a typo like `descripton`, is a 422, so a typo can't
+  quietly erase data.
+- **A broken saved mandate doesn't break the rest.** Rows are checked when read. One that no
+  longer fits the form (edited by hand, or an old format) is left out of lists and logged;
+  fetching it directly returns a 500 naming the mandate and the problem. The list response's
+  `skipped` count in the list reply (`{"mandates": [...], "skipped": n}`) says how many were left
+  out, so a UI can show it. (Only data
+  problems are skipped; a genuine code error still surfaces as an error.) It can still be fixed
+  with a PUT, or archived (the archive reply then carries `problem` instead of the criteria). The stored `criteria` carry a `schema_version`: bump it (and upgrade
+  old rows) whenever a change would make existing rows invalid.
+- **Archive, don't delete.** Archived mandates disappear from the list and can't be edited or
+  selected, but stay in the database so old screenings still show their criteria. Active names
+  must be unique per organization (ignoring case).
+- **Demo mandate:** `python -m backend.scripts.create_demo_mandate --organization-id <uuid>` saves
+  "Demo - Sun Belt Value-Add Multifamily" (marked `is_demo`, safe to run twice; a wrong
+  organization id prints a message instead of crashing).
+- **Setup:** apply `supabase/migrations/20261013_create_h9n_investment_mandates.sql` after the two
+  migrations above.
+- **Known gap - roles:** any member of an organization can create, edit and archive its mandates,
+  including `viewer`s. Restricting edits to admins needs the member's role from sign-in (M2.5).
+- **Security - before customers use this:** until sign-in (M2.5) lands, anyone with the shared
+  internal API key can pass any `organization_id` and read or edit that organization's mandates.
+  Every mandate route, `/vocabulary` included, needs that key. Access is checked in one place
+  (`_caller_has_access` in `app/h9n/screening/api.py`), and
+  switching it to the signed-in user's organizations is part of the M2.5 work, not a separate task.
+
 ## Settings
 
 | Env var | Required? | Default | What it's for |

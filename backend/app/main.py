@@ -33,6 +33,7 @@ from backend.app.h9n.ingestion.pdf_reader import MAX_UPLOAD_BYTES, PdfReadError,
 from backend.app.h9n.rag.api import router as rag_router
 from backend.app.h9n.rag.config import RagConfigurationError, get_rag_settings
 from backend.app.h9n.review.store import DealNotFoundError, DealStore
+from backend.app.h9n.screening.api import router as mandate_router
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 
 
@@ -41,6 +42,8 @@ logger = logging.getLogger(__name__)
 # Creates the main FastAPI application for HANA
 app = FastAPI()
 app.include_router(rag_router)
+# Milestone 3.1: investment mandates (see backend/app/h9n/screening/api.py).
+app.include_router(mandate_router)
 
 # Milestone 1, item 4: where extracted deals are saved so a reviewer can
 # fetch and correct one later by id. See store.py for why this is a simple
