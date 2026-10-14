@@ -14,19 +14,43 @@ export class ApiError extends Error {
 /** Where a deal stands in review (M2.4): approved deals are locked until reopened. */
 export type ReviewStatus = "draft" | "reviewed" | "approved";
 
-/** The fields the app currently shows from a REPEDealProfile. */
+/** Where an extracted value came from (backend FieldEvidence). */
+export interface FieldEvidence {
+  field_name: string;
+  value: string | null;
+  source_document: string | null;
+  page_number: number | null;
+  snippet: string | null;
+  verification: "value_matched" | "quote_only" | null;
+}
+
+/**
+ * A value the extractor proposed but couldn't verify, held back for a
+ * reviewer to accept or dismiss; its field stays empty meanwhile.
+ */
+export interface WithheldValue {
+  field_name: string;
+  proposed_value: string | number;
+  reason: string;
+  detail: string;
+  evidence: FieldEvidence | null;
+}
+
+/**
+ * A REPEDealProfile. The value fields (deal_name, asking_price, ...) are
+ * listed in lib/dealFields.ts; the rest is what the extractor and reviewers
+ * recorded about them.
+ */
 export interface DealProfile {
   deal_name: string | null;
   property_name: string | null;
-  property_type: string | null;
-  address: string | null;
-  asking_price: number | null;
-  noi: number | null;
-  cap_rate: number | null;
   missing_information: string[];
   conflicting_information: string[];
   uncertain_information: string[];
-  withheld_values: { field_name: string }[];
+  withheld_values: WithheldValue[];
+  evidence: FieldEvidence[];
+  corrected_fields: string[];
+  review_feedback: string | null;
   review_status: ReviewStatus;
   [field: string]: unknown;
 }
@@ -48,6 +72,39 @@ export interface DealRecord {
   created_at: string;
   updated_at: string;
   profile: DealProfile;
+}
+
+/** What a reviewer can do to a deal as a whole (M2.4). "reject" needs feedback. */
+export type ReviewAction = "review" | "approve" | "reopen" | "reject";
+
+/** One corrected field in a deal's history. */
+export interface Correction {
+  field_name: string;
+  original_value: unknown;
+  corrected_value: unknown;
+  evidence: FieldEvidence | null;
+  /** "reviewer_feedback": re-derived from the document after a rejection. */
+  source: "reviewer" | "reviewer_feedback";
+  feedback: string | null;
+  corrected_by: string;
+  deal_version: number;
+  created_at: string;
+}
+
+/** One status change in a deal's history; "edit" is the automatic move back to draft. */
+export interface StatusChange {
+  action: ReviewAction | "edit";
+  from_status: ReviewStatus;
+  to_status: ReviewStatus;
+  note: string | null;
+  changed_by: string;
+  deal_version: number;
+  created_at: string;
+}
+
+export interface DealHistory {
+  corrections: Correction[];
+  status_changes: StatusChange[];
 }
 
 /** One row of GET /api/h9n/repe/deals. */
@@ -166,12 +223,18 @@ export async function uploadDeal(
   });
 }
 
-/** GETs an H9N API path as the signed-in user, turning failures into ApiErrors. */
-async function getJson<T>(path: string): Promise<T> {
+/** Calls the H9N API as the signed-in user, turning failures into ApiErrors. */
+async function requestJson<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const token = await accessToken();
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (init.body !== undefined) headers["Content-Type"] = "application/json";
   let response: Response;
   try {
-    response = await fetch(apiUrl(path), { headers: { Authorization: `Bearer ${token}` } });
+    response = await fetch(apiUrl(path), {
+      method: init.method ?? "GET",
+      headers,
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
   } catch {
     throw new ApiError(0, "Couldn't reach the H9N service. Check your connection and try again.");
   }
@@ -182,15 +245,46 @@ async function getJson<T>(path: string): Promise<T> {
 
 /** Lists the deals the user's organizations own, most recently saved first. */
 export function listDeals(): Promise<DealSummary[]> {
-  return getJson<DealSummary[]>("/api/h9n/repe/deals");
+  return requestJson<DealSummary[]>("/api/h9n/repe/deals");
+}
+
+function dealPath(dealId: string, rest = ""): string {
+  return `/api/h9n/repe/deals/${encodeURIComponent(dealId)}${rest}`;
 }
 
 /** Fetches a saved deal from GET /api/h9n/repe/deals/{id}. */
 export function getDeal(dealId: string): Promise<DealRecord> {
-  return getJson<DealRecord>(`/api/h9n/repe/deals/${encodeURIComponent(dealId)}`);
+  return requestJson<DealRecord>(dealPath(dealId));
 }
 
 /** Fetches the signed-in user and their organizations from GET /api/h9n/me. */
 export function getCurrentUser(): Promise<CurrentUser> {
-  return getJson<CurrentUser>("/api/h9n/me");
+  return requestJson<CurrentUser>("/api/h9n/me");
+}
+
+/**
+ * Saves a reviewer's corrections (PATCH /deals/{id}). `version` is the one
+ * the reviewer was looking at; if someone else saved since, this fails with
+ * a 409 instead of overwriting their changes.
+ */
+export function correctDeal(dealId: string, version: number, changes: Record<string, unknown>): Promise<DealRecord> {
+  return requestJson<DealRecord>(dealPath(dealId), { method: "PATCH", body: { version, changes } });
+}
+
+/** A review action on the whole deal (POST /deals/{id}/review). */
+export function reviewDeal(
+  dealId: string,
+  action: ReviewAction,
+  version: number,
+  feedback?: string,
+): Promise<DealRecord> {
+  return requestJson<DealRecord>(dealPath(dealId, "/review"), {
+    method: "POST",
+    body: feedback === undefined ? { action, version } : { action, version, feedback },
+  });
+}
+
+/** Every correction and status change on a deal, oldest first. */
+export function getDealHistory(dealId: string): Promise<DealHistory> {
+  return requestJson<DealHistory>(dealPath(dealId, "/history"));
 }
