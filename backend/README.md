@@ -345,6 +345,17 @@ or has no readable text, gets a 422; if Claude doesn't return something usable, 
 reached, you get a 502 or 503 with a plain explanation instead of an empty/blank profile (see the
 error table under "Extraction reliability").
 
+List every deal your organization has saved, most recently saved first (this is what the web app's
+deal list uses - Milestone 2.1):
+
+```bash
+curl http://localhost:8000/api/h9n/repe/deals \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Each row has `deal_id`, `deal_name`, `property_name`, `review_status` and `saved_at`. Other
+organizations' deals are never listed.
+
 Fetch that same deal again later by its id:
 
 ```bash

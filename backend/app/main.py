@@ -84,6 +84,16 @@ class ExtractResponse(BaseModel):
     extraction_run_id: UUID
 
 
+# One row of GET /deals: enough for the web app's deal list to show and
+# reopen a saved deal without loading every full profile (Milestone 2.1).
+class DealSummary(BaseModel):
+    deal_id: str
+    deal_name: Optional[str]
+    property_name: Optional[str]
+    review_status: str
+    saved_at: datetime
+
+
 # What a reviewer submits to POST /deals/{deal_id}/review. Only "approved"
 # and "rejected" are accepted here - "pending" is only ever the starting
 # state a fresh extraction gets, never something submitted after the fact.
@@ -248,6 +258,29 @@ def _require_deal_access(deal_id: str, user: AuthenticatedUser) -> None:
     deal that doesn't exist, so its existence isn't revealed."""
     if _review_store.owner_of(deal_id) not in user.organization_ids:
         raise HTTPException(status_code=404, detail=f"No deal found with id {deal_id!r}.")
+
+
+# Milestone 2.1: the deals the caller's organizations own, most recently
+# saved first, so a reviewer can reopen one in the web app. Deals saved
+# without an owner (before Milestone 2.5) are left out, as they are by every
+# other deal route.
+@app.get("/api/h9n/repe/deals", response_model=list[DealSummary])
+def list_repe_deals(user: AuthenticatedUser = Depends(get_current_user)) -> list[DealSummary]:
+    summaries = []
+    for deal_id in _review_store.list_ids():
+        if _review_store.owner_of(deal_id) not in user.organization_ids:
+            continue
+        deal = _review_store.get(deal_id)
+        summaries.append(
+            DealSummary(
+                deal_id=deal_id,
+                deal_name=deal.deal_name,
+                property_name=deal.property_name,
+                review_status=deal.review_status,
+                saved_at=_review_store.saved_at(deal_id),
+            )
+        )
+    return sorted(summaries, key=lambda summary: summary.saved_at, reverse=True)
 
 
 # Milestone 1, item 4: fetch a previously extracted deal by id, e.g. to show
