@@ -85,6 +85,7 @@ class SupabaseDealRepository:
             "profile": deal.profile.model_dump(mode="json"),
             "source_filename": deal.source_filename,
             "source_pages": deal.source_pages,
+            "source_storage_path": deal.source_storage_path,
             "extraction_run_id": str(deal.extraction_run_id) if deal.extraction_run_id else None,
             "created_by": str(deal.created_by),
         }

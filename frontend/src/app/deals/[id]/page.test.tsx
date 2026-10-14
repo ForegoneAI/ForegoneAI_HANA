@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   reviewDeal: vi.fn(),
   getCurrentUser: vi.fn(),
   getDealHistory: vi.fn(),
+  getDealSource: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
@@ -76,6 +77,7 @@ function deal(overrides: Partial<DealRecord> = {}, profileOverrides: Partial<Dea
     status: "draft",
     version: 1,
     source_filename: "elm.pdf",
+    has_source_pdf: true,
     extraction_run_id: null,
     created_by: "user-me",
     created_at: "2026-10-14T12:00:00Z",
@@ -113,7 +115,7 @@ describe("the deal review form", () => {
     }
     const price = field("Asking price").closest(".review-field") as HTMLElement;
     expect(within(price).getByText("Cited")).toBeTruthy();
-    expect(within(price).getByText("p. 3")).toBeTruthy();
+    expect(within(price).getByRole("button", { name: "Show the source for Asking price, page 3" })).toBeTruthy();
     const noi = field("NOI").closest(".review-field") as HTMLElement;
     expect(within(noi).getByText("Uncertain")).toBeTruthy();
     expect(within(noi).getByText("the OM says approximately $650k")).toBeTruthy();
@@ -246,5 +248,114 @@ describe("review actions", () => {
 
     expect(await screen.findByText(/The rejection and feedback were saved/)).toBeTruthy();
     await waitFor(() => expect(api.getDeal).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("the evidence viewer", () => {
+  const link = (minutes: number) => ({
+    url: "https://storage.example/org/deal-1/source.pdf?token=t",
+    expires_at: new Date(Date.now() + minutes * 60_000).toISOString(),
+    filename: "elm.pdf",
+  });
+
+  const panel = () => screen.getByRole("complementary");
+
+  it("shows a field's quote beside the PDF opened at the cited page", async () => {
+    const user = await openDeal();
+    api.getDealSource.mockResolvedValue(link(10));
+
+    await user.click(screen.getByRole("button", { name: "Show the source for Asking price, page 3" }));
+
+    expect(within(panel()).getByRole("heading", { name: "Asking price" })).toBeTruthy();
+    expect(within(panel()).getByText("$10,000,000")).toBeTruthy();
+    expect(within(panel()).getByText("Asking Price: $10,000,000")).toBeTruthy();
+    expect(within(panel()).getByText("elm.pdf · page 3")).toBeTruthy();
+    expect(within(panel()).getByText("The quoted text contains this value.")).toBeTruthy();
+    const frame = (await within(panel()).findByTitle("elm.pdf, page 3")) as HTMLIFrameElement;
+    expect(frame.src).toBe("https://storage.example/org/deal-1/source.pdf?token=t#page=3");
+    expect(api.getDealSource).toHaveBeenCalledWith("deal-1");
+  });
+
+  it("asks for the PDF link once, and again only after it expires", async () => {
+    const user = await openDeal();
+    api.getDealSource.mockResolvedValueOnce(link(10)).mockResolvedValueOnce(link(10));
+
+    await user.click(screen.getByRole("button", { name: /Show the source for Asking price/ }));
+    await within(panel()).findByTitle(/elm\.pdf/);
+    await user.click(screen.getByRole("button", { name: /Show the source for Deal name/ }));
+    expect(api.getDealSource).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    api.getDealSource.mockReset().mockResolvedValueOnce(link(0)).mockResolvedValueOnce(link(10));
+    const again = await openDeal();
+    await again.click(screen.getByRole("button", { name: /Show the source for Asking price/ }));
+    await within(panel()).findByTitle(/elm\.pdf/);
+    await again.click(screen.getByRole("button", { name: /Show the source for Deal name/ }));
+    expect(api.getDealSource).toHaveBeenCalledTimes(2);
+  });
+
+  it("closes with Escape", async () => {
+    const user = await openDeal();
+    api.getDealSource.mockResolvedValue(link(10));
+
+    await user.click(screen.getByRole("button", { name: /Show the source for Asking price/ }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("complementary")).toBeNull();
+  });
+
+  it("warns when the only citation is one that didn't check out", async () => {
+    const user = await openDeal(
+      deal(
+        {},
+        {
+          withheld_values: [
+            {
+              field_name: "noi",
+              proposed_value: 650000,
+              reason: "snippet_not_on_page",
+              detail: "The quoted snippet was not found on page 9.",
+              evidence: {
+                field_name: "noi",
+                value: "650000",
+                source_document: "elm.pdf",
+                page_number: 9,
+                snippet: "NOI of roughly $650k",
+                verification: null,
+              },
+            },
+          ],
+        },
+      ),
+    );
+    api.getDealSource.mockResolvedValue(link(10));
+
+    await user.click(screen.getByRole("button", { name: "Show the source for NOI, page 9" }));
+
+    expect(within(panel()).getByText("NOI of roughly $650k")).toBeTruthy();
+    expect(within(panel()).getByText(/didn't check out against the document/)).toBeTruthy();
+    expect(within(panel()).getByText("No value")).toBeTruthy();
+  });
+
+  it("shows the quote alone when the PDF wasn't kept", async () => {
+    const user = await openDeal(deal({ has_source_pdf: false }));
+
+    await user.click(screen.getByRole("button", { name: /Show the source for Asking price/ }));
+
+    expect(within(panel()).getByText("Asking Price: $10,000,000")).toBeTruthy();
+    expect(within(panel()).getByText(/original PDF wasn't kept/)).toBeTruthy();
+    expect(api.getDealSource).not.toHaveBeenCalled();
+  });
+
+  it("explains a missing PDF, and offers a retry when opening it fails", async () => {
+    const user = await openDeal();
+    api.getDealSource.mockRejectedValueOnce(new ApiError(502, "The original PDF can't be opened right now."));
+
+    await user.click(screen.getByRole("button", { name: /Show the source for Asking price/ }));
+    expect(await within(panel()).findByText("The original PDF can't be opened right now.")).toBeTruthy();
+
+    api.getDealSource.mockResolvedValueOnce(link(10));
+    await user.click(within(panel()).getByRole("button", { name: "Try again" }));
+    expect(await within(panel()).findByTitle("elm.pdf, page 3")).toBeTruthy();
   });
 });

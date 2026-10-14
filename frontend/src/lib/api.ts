@@ -67,6 +67,8 @@ export interface DealRecord {
   status: ReviewStatus;
   version: number;
   source_filename: string;
+  /** Whether the original PDF was kept, so it can be opened (M2.3). */
+  has_source_pdf: boolean;
   extraction_run_id: string | null;
   created_by: string;
   created_at: string;
@@ -287,4 +289,16 @@ export function reviewDeal(
 /** Every correction and status change on a deal, oldest first. */
 export function getDealHistory(dealId: string): Promise<DealHistory> {
   return requestJson<DealHistory>(dealPath(dealId, "/history"));
+}
+
+/** A short-lived link to a deal's original PDF (M2.3). */
+export interface SourcePdf {
+  url: string;
+  expires_at: string;
+  filename: string;
+}
+
+/** Gets a link to the deal's PDF; it stops working at `expires_at`. */
+export function getDealSource(dealId: string): Promise<SourcePdf> {
+  return requestJson<SourcePdf>(dealPath(dealId, "/source"));
 }

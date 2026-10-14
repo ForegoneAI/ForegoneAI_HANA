@@ -13,6 +13,9 @@ interface FieldRowProps {
   /** The proposal was accepted or dismissed (not yet saved). */
   proposalResolved: boolean;
   readOnly: boolean;
+  /** This field's source is open in the evidence panel. */
+  selected: boolean;
+  onShowSource: () => void;
   onInput: (value: string) => void;
   onAcceptProposal: () => void;
   onDismissProposal: () => void;
@@ -27,6 +30,8 @@ export function FieldRow({
   error,
   proposalResolved,
   readOnly,
+  selected,
+  onShowSource,
   onInput,
   onAcceptProposal,
   onDismissProposal,
@@ -37,7 +42,7 @@ export function FieldRow({
   const status = STATUS_DISPLAY[review.status];
   const numeric = field.kind !== "text" && field.kind !== "longtext";
   const preview = numeric && "value" in parsed && parsed.value !== null ? formatValue(field.kind, parsed.value) : "";
-  const page = review.evidence?.page_number;
+  const page = (review.evidence ?? review.withheld?.evidence)?.page_number;
   const describedBy = [error && `${id}-error`, review.notes.length > 0 && `${id}-notes`].filter(Boolean).join(" ");
 
   const inputProps = {
@@ -50,15 +55,24 @@ export function FieldRow({
   };
 
   return (
-    <div className="review-field" data-status={review.status} data-edited={edited || undefined}>
+    <div
+      className="review-field"
+      data-status={review.status}
+      data-edited={edited || undefined}
+      data-selected={selected || undefined}
+    >
       <div className="review-field__head">
         <label htmlFor={id}>{field.label}</label>
         <Badge tone={status.tone}>{status.label}</Badge>
-        {page != null && (
-          <span className="muted mono review-field__source" title={review.evidence?.snippet ?? undefined}>
-            p. {page}
-          </span>
-        )}
+        <button
+          type="button"
+          className="source-link"
+          onClick={onShowSource}
+          aria-pressed={selected}
+          aria-label={`Show the source for ${field.label}${page != null ? `, page ${page}` : ""}`}
+        >
+          Source{page != null && <span className="mono"> · p. {page}</span>}
+        </button>
       </div>
 
       {field.kind === "longtext" ? (

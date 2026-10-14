@@ -10,18 +10,22 @@ import { Notice } from "@/components/Notice";
 import { RequireSignIn } from "@/components/RequireSignIn";
 import { DealHistoryPanel } from "@/components/review/DealHistoryPanel";
 import { DealReviewForm } from "@/components/review/DealReviewForm";
+import { EvidencePanel, type SourceState } from "@/components/review/EvidencePanel";
 import { ReviewActions } from "@/components/review/ReviewActions";
 import {
   ApiError,
   correctDeal,
   getCurrentUser,
   getDeal,
+  getDealSource,
   reviewDeal,
   type DealRecord,
   type ReviewAction,
 } from "@/lib/api";
 import { dealTitle, formatSavedAt, reviewStatusBadge } from "@/lib/deals";
-import { attentionCount } from "@/lib/fieldStatus";
+import { ALL_FIELDS, valueOf } from "@/lib/dealFields";
+import { linkIsFresh } from "@/lib/evidence";
+import { attentionCount, reviewField } from "@/lib/fieldStatus";
 
 const DONE: Record<ReviewAction, string> = {
   review: "Marked reviewed.",
@@ -32,7 +36,8 @@ const DONE: Record<ReviewAction, string> = {
 
 /**
  * The deal workspace (M2.2): the Deal Profile as an editable review form,
- * the review actions (M2.4), and the deal's history.
+ * the review actions (M2.4), the deal's history, and beside the form, the
+ * source of whichever field the reviewer opens (M2.3).
  */
 function DealWorkspace() {
   const { id } = useParams<{ id: string }>();
@@ -42,7 +47,11 @@ function DealWorkspace() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<ReviewAction | null>(null);
+  const [sourceField, setSourceField] = useState<string | null>(null);
+  const [source, setSource] = useState<SourceState | null>(null);
   const [message, setMessage] = useState<{ tone?: "ok" | "error"; text: string; reload?: boolean } | null>(null);
+
+  const closeSource = useCallback(() => setSourceField(null), []);
 
   const signInAgain = useCallback(
     () => router.replace(`/login?next=${encodeURIComponent(`/deals/${id}`)}`),
@@ -85,6 +94,25 @@ function DealWorkspace() {
     // Part of the request may have been saved (e.g. a rejection whose
     // re-check failed), so show the deal as it is now.
     if (caught instanceof ApiError && caught.status >= 500) await load();
+  }
+
+  /** Loads a link to the deal's PDF, the first time it's needed or once it has expired. */
+  async function loadSource(dealId: string) {
+    setSource({ status: "loading" });
+    try {
+      setSource({ status: "ready", pdf: await getDealSource(dealId) });
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) return signInAgain();
+      const text = caught instanceof Error ? caught.message : "The PDF couldn't be opened.";
+      setSource(caught instanceof ApiError && caught.status === 404 ? { status: "missing", message: text } : { status: "error", message: text });
+    }
+  }
+
+  function showSource(field: string) {
+    setSourceField(field);
+    if (!deal?.has_source_pdf) return;
+    const stale = source?.status === "ready" && !linkIsFresh(source.pdf);
+    if (source === null || source.status === "error" || stale) void loadSource(deal.deal_id);
   }
 
   async function saveChanges(changes: Record<string, unknown>) {
@@ -131,9 +159,10 @@ function DealWorkspace() {
   }
 
   const status = reviewStatusBadge(deal.status);
+  const sourceSpec = ALL_FIELDS.find((field) => field.name === sourceField) ?? null;
 
   return (
-    <main className="page page--wide">
+    <main className={sourceField ? "page page--wider" : "page page--wide"}>
       <p className="breadcrumb">
         <Link href="/deals">← All deals</Link>
       </p>
@@ -173,7 +202,27 @@ function DealWorkspace() {
         </Notice>
       )}
 
-      <DealReviewForm key={`form-${deal.version}`} deal={deal} onSave={saveChanges} onDirtyChange={setDirty} />
+      <div className={sourceSpec ? "workspace workspace--with-source" : "workspace"}>
+        <DealReviewForm
+          key={`form-${deal.version}`}
+          deal={deal}
+          onSave={saveChanges}
+          onDirtyChange={setDirty}
+          sourceField={sourceField}
+          onShowSource={showSource}
+        />
+        {sourceSpec && (
+          <EvidencePanel
+            field={sourceSpec}
+            review={reviewField(deal.profile, sourceSpec.name)}
+            value={valueOf(deal.profile, sourceSpec.name)}
+            sourceFilename={deal.source_filename}
+            source={deal.has_source_pdf ? source : null}
+            onRetrySource={() => void loadSource(deal.deal_id)}
+            onClose={closeSource}
+          />
+        )}
+      </div>
 
       <DealHistoryPanel dealId={deal.deal_id} version={deal.version} currentUserId={userId} />
     </main>

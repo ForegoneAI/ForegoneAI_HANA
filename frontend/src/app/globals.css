@@ -100,6 +100,10 @@ code,
   max-width: 1040px;
 }
 
+.page--wider {
+  max-width: 1440px;
+}
+
 .page--narrow {
   max-width: 420px;
   padding-top: 12vh;
@@ -584,6 +588,11 @@ textarea[readonly] {
   background: var(--bg-raise);
 }
 
+.review-field[data-selected] {
+  border-color: var(--ink-3);
+  box-shadow: 0 0 0 1px var(--ink-3);
+}
+
 .review-field__head {
   display: flex;
   align-items: center;
@@ -597,9 +606,21 @@ textarea[readonly] {
   margin-right: auto;
 }
 
-.review-field__source {
+.source-link {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
   font-size: 0.78rem;
-  cursor: help;
+  cursor: pointer;
+}
+
+.source-link:hover,
+.source-link[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: var(--ink-3);
 }
 
 .review-field__meta {
@@ -699,4 +720,122 @@ textarea[readonly] {
   display: block;
   margin-top: 2px;
   color: var(--ink-2);
+}
+
+/* Evidence viewer (M2.3): beside the form on wide screens, a bottom sheet on phones. */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.evidence {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  overflow: auto;
+}
+
+.evidence__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.evidence__head h2 {
+  margin: 0 auto 0 0;
+  font-size: 1.1rem;
+}
+
+.evidence__head h2:focus {
+  outline: none;
+}
+
+.evidence__value {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.citation {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  background: var(--bg-1);
+}
+
+.citation--unverified {
+  border-left-color: var(--warn);
+}
+
+.citation p {
+  margin: 0;
+}
+
+.citation__where {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.citation blockquote {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.citation__check {
+  font-size: 0.82rem;
+}
+
+.evidence__pdf {
+  display: grid;
+  gap: 8px;
+  font-size: 0.88rem;
+}
+
+.evidence__pdf iframe {
+  width: 100%;
+  height: 70vh;
+  min-height: 360px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+@media (min-width: 1000px) {
+  .workspace--with-source {
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 46%);
+  }
+
+  .workspace--with-source .evidence {
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 32px);
+  }
+}
+
+@media (max-width: 999px) {
+  .workspace--with-source .evidence {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 10;
+    max-height: 75vh;
+    border-radius: var(--radius) var(--radius) 0 0;
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  .evidence__pdf iframe {
+    height: 45vh;
+    min-height: 240px;
+  }
 }

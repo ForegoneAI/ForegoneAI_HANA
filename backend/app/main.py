@@ -3,7 +3,7 @@ import logging
 import os
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterator, NoReturn, Optional, TypeVar
@@ -44,6 +44,7 @@ from backend.app.h9n.review.models import (
     NewDeal,
     ReviewAction,
 )
+from backend.app.h9n.review.files import DealFileStore, SupabaseDealFileStore, source_pdf_path
 from backend.app.h9n.review.repository import DealRepository, SupabaseDealRepository
 from backend.app.h9n.review.workflow import plan_corrections, plan_review_action
 from backend.app.h9n.screening.api import router as mandate_router
@@ -84,6 +85,17 @@ def get_deal_repository() -> DealRepository:
     return SupabaseDealRepository(get_rag_settings())
 
 
+# Milestone 2.3: where each deal's uploaded PDF is kept (see review/files.py).
+@lru_cache
+def get_deal_file_store() -> DealFileStore:
+    return SupabaseDealFileStore(get_rag_settings())
+
+
+# How long a link to a deal's PDF works. Long enough to read the document,
+# short enough that a copied link soon stops working.
+SOURCE_URL_SECONDS = 10 * 60
+
+
 # Milestone 1.3: where extraction runs are recorded. Built on first use so the
 # app still starts (and tests still run) without Supabase credentials.
 @lru_cache
@@ -121,6 +133,8 @@ class DealOut(BaseModel):
     status: ReviewStatus
     version: int
     source_filename: str
+    # Whether the original PDF can be opened (GET /deals/{id}/source).
+    has_source_pdf: bool
     extraction_run_id: Optional[UUID]
     created_by: UUID
     created_at: datetime
@@ -129,7 +143,18 @@ class DealOut(BaseModel):
 
     @classmethod
     def from_record(cls, record: DealRecord) -> "DealOut":
-        return cls(deal_id=record.id, **record.model_dump(exclude={"id", "source_pages"}))
+        return cls(
+            deal_id=record.id,
+            has_source_pdf=record.source_storage_path is not None,
+            **record.model_dump(exclude={"id", "source_pages", "source_storage_path"}),
+        )
+
+
+# GET /deals/{deal_id}/source: a short-lived link to the deal's original PDF.
+class SourcePdfOut(BaseModel):
+    url: str
+    expires_at: datetime
+    filename: str
 
 
 # What a reviewer submits to PATCH /deals/{deal_id}: the version they
@@ -243,22 +268,53 @@ def extract_repe_deal_from_upload(
     if error is not None:
         _raise_extraction_error(error)
 
+    # Milestone 2.3: keep the PDF so a reviewer can open it at a cited page.
+    source_storage_path = _store_source_pdf(organization_id, deal_id, file_bytes)
+
     # Saved with its source pages, so a reviewer's later feedback can be
     # checked against the document again (see the review endpoint below).
-    _deals(
-        lambda deals: deals.create(
-            NewDeal(
-                id=deal_id,
-                organization_id=organization_id,
-                profile=deal,
-                source_filename=source_filename,
-                source_pages=pages,
-                extraction_run_id=extraction_run_id,
-                created_by=user.user_id,
+    try:
+        _deals(
+            lambda deals: deals.create(
+                NewDeal(
+                    id=deal_id,
+                    organization_id=organization_id,
+                    profile=deal,
+                    source_filename=source_filename,
+                    source_pages=pages,
+                    source_storage_path=source_storage_path,
+                    extraction_run_id=extraction_run_id,
+                    created_by=user.user_id,
+                )
             )
         )
-    )
+    except HTTPException:
+        if source_storage_path:
+            _remove_source_pdf(source_storage_path)
+        raise
     return ExtractResponse(deal_id=deal_id, profile=deal, extraction_run_id=extraction_run_id)
+
+
+def _store_source_pdf(organization_id: UUID, deal_id: UUID, file_bytes: bytes) -> Optional[str]:
+    """Saves the uploaded PDF for the evidence viewer (Milestone 2.3) and
+    returns where. If it can't be saved, the deal is still worth keeping - a
+    reviewer can verify values from the quoted snippets - so this logs the
+    failure and returns None instead of failing the upload."""
+    path = source_pdf_path(organization_id, deal_id)
+    try:
+        get_deal_file_store().upload(path, file_bytes)
+    except Exception:
+        logger.exception("Couldn't store the source PDF for deal %s", deal_id)
+        return None
+    return path
+
+
+def _remove_source_pdf(path: str) -> None:
+    """Removes a stored PDF whose deal couldn't be saved, so no orphan is left."""
+    try:
+        get_deal_file_store().remove(path)
+    except Exception:
+        logger.exception("Couldn't remove the orphaned source PDF %s", path)
 
 
 def _raise_extraction_error(error: Exception, *, prefix: str = "") -> NoReturn:
@@ -392,6 +448,29 @@ def list_repe_deals(user: AuthenticatedUser = Depends(get_current_user)) -> list
 @app.get("/api/h9n/repe/deals/{deal_id}", response_model=DealOut)
 def get_repe_deal(deal_id: str, user: AuthenticatedUser = Depends(get_current_user)) -> DealOut:
     return DealOut.from_record(_load_deal(deal_id, user))
+
+
+# Milestone 2.3: a link to the deal's original PDF, so the evidence viewer can
+# open it at a cited page. Only for the deal's own organization (like every
+# deal route), and only for SOURCE_URL_SECONDS. 404 when the PDF wasn't kept;
+# the viewer then shows the quoted snippet alone.
+@app.get("/api/h9n/repe/deals/{deal_id}/source", response_model=SourcePdfOut)
+def get_repe_deal_source(deal_id: str, user: AuthenticatedUser = Depends(get_current_user)) -> SourcePdfOut:
+    deal = _load_deal(deal_id, user)
+    if not deal.source_storage_path:
+        raise HTTPException(status_code=404, detail="The original PDF wasn't kept for this deal.")
+    try:
+        url = get_deal_file_store().signed_url(deal.source_storage_path, SOURCE_URL_SECONDS)
+    except RagConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # Storage details go to the log, never to the caller.
+        logger.exception("Couldn't sign a source PDF URL for deal %s", deal.id)
+        raise HTTPException(status_code=502, detail="The original PDF can't be opened right now.") from exc
+    return SourcePdfOut(
+        url=url,
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=SOURCE_URL_SECONDS),
+        filename=deal.source_filename,
+    )
 
 
 # Milestone 2.4: everything reviewers have done to a deal, oldest first -

@@ -16,6 +16,9 @@ interface DealReviewFormProps {
   onSave: (changes: Record<string, unknown>) => Promise<void>;
   /** Told whether there are unsaved changes, so review actions can wait for them. */
   onDirtyChange: (dirty: boolean) => void;
+  /** The field whose source is open in the evidence panel (M2.3). */
+  sourceField: string | null;
+  onShowSource: (field: string) => void;
 }
 
 /**
@@ -26,7 +29,7 @@ interface DealReviewFormProps {
  * Remount it (key={deal.version}) when the deal changes, so the inputs start
  * from the saved values again.
  */
-export function DealReviewForm({ deal, onSave, onDirtyChange }: DealReviewFormProps) {
+export function DealReviewForm({ deal, onSave, onDirtyChange, sourceField, onShowSource }: DealReviewFormProps) {
   const profile = deal.profile;
   const readOnly = deal.status === "approved";
   const initial = useMemo(() => initialInputs(profile), [profile]);
@@ -123,6 +126,8 @@ export function DealReviewForm({ deal, onSave, onDirtyChange }: DealReviewFormPr
                   error={showErrors || inputs[field.name] !== initial[field.name] ? errors[field.name] : undefined}
                   proposalResolved={resolved.has(field.name)}
                   readOnly={readOnly || saving}
+                  selected={sourceField === field.name}
+                  onShowSource={() => onShowSource(field.name)}
                   onInput={(value) => setInputs((current) => ({ ...current, [field.name]: value }))}
                   onAcceptProposal={() => {
                     const proposal = reviews[field.name].withheld;

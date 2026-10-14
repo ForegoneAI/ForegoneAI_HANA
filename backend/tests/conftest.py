@@ -7,6 +7,7 @@ from backend.app.h9n.auth import get_current_user
 from backend.app.h9n.extraction import repe_extractor
 from backend.app.h9n.review.repository import InMemoryDealRepository
 from backend.tests.auth_fakes import TEST_USER, FakeRunRepository
+from backend.tests.file_fakes import FakeDealFileStore
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,14 @@ def deal_repository(monkeypatch) -> InMemoryDealRepository:
     repository = InMemoryDealRepository()
     monkeypatch.setattr(main, "get_deal_repository", lambda: repository)
     return repository
+
+
+@pytest.fixture(autouse=True)
+def deal_files(monkeypatch) -> FakeDealFileStore:
+    """Deal PDFs (Milestone 2.3) are kept in memory during tests."""
+    files = FakeDealFileStore()
+    monkeypatch.setattr(main, "get_deal_file_store", lambda: files)
+    return files
 
 
 @pytest.fixture(autouse=True)

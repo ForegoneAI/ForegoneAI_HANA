@@ -211,7 +211,19 @@ by sending `"withheld_values": []`. They can't rewrite `evidence` or set `review
   version and writes the change and its history in one transaction (`save_deal_changes()` in the
   migration).
 
-**Setup:** apply `supabase/migrations/20261014_create_h9n_deals.sql` after the RAG and
+**The original PDF (Milestone 2.3).** Each upload is also kept in the private Supabase bucket, at
+`{organization_id}/{deal_id}/source.pdf`, so the web app can open it at the page a value was cited
+from. `GET /deals/{id}/source` returns `{url, expires_at, filename}`: a signed link that works for
+10 minutes, only for members of the deal's organization. Nobody can read these files from the
+bucket directly.
+
+- If the PDF can't be kept (e.g. storage is down, or it's over the bucket's 25 MB limit), the
+  upload still succeeds and the deal says `has_source_pdf: false`. The reviewer still sees the
+  quoted snippets; `/source` answers 404.
+- If the deal can't be saved, the kept PDF is removed again.
+
+**Setup:** apply `supabase/migrations/20261014_create_h9n_deals.sql` and then
+`20261015_add_deal_source_pdf.sql`, after the RAG and
 extraction-run migrations. Deals saved by earlier versions as JSON files under
 `backend/data/reviews/` aren't imported; they had no organization owner, so the API already
 refused to serve them.
@@ -401,6 +413,13 @@ curl -X POST http://localhost:8000/api/h9n/repe/deals/b6b6a1e2-.../review \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"action": "approve", "version": 2}'
+```
+
+A link to the original PDF, for the evidence viewer (works for 10 minutes):
+
+```bash
+curl http://localhost:8000/api/h9n/repe/deals/b6b6a1e2-.../source \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 And the full history of who changed what:
