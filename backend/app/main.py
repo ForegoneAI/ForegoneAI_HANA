@@ -12,7 +12,7 @@ from fastapi import Body, Depends, FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend.app.h9n.auth import AuthenticatedUser, get_current_user, resolve_organization
+from backend.app.h9n.auth import AuthenticatedUser, get_current_user, organizations_of, resolve_organization
 from backend.app.h9n.extraction.repe_extractor import (
     DEFAULT_MODEL,
     ExtractionConfigurationError,
@@ -88,6 +88,7 @@ class ExtractResponse(BaseModel):
 # reopen a saved deal without loading every full profile (Milestone 2.1).
 class DealSummary(BaseModel):
     deal_id: str
+    organization_id: UUID
     deal_name: Optional[str]
     property_name: Optional[str]
     review_status: str
@@ -260,6 +261,29 @@ def _require_deal_access(deal_id: str, user: AuthenticatedUser) -> None:
         raise HTTPException(status_code=404, detail=f"No deal found with id {deal_id!r}.")
 
 
+# What GET /me returns: who is signed in and which organizations they may act
+# for (Milestone 2.5).
+class OrganizationOut(BaseModel):
+    id: UUID
+    name: str
+
+
+class CurrentUser(BaseModel):
+    user_id: UUID
+    organizations: list[OrganizationOut]
+
+
+# Milestone 2.5: the signed-in user and their organizations, by name. The web
+# app uses this to ask a member of several organizations which one an upload
+# is for - the API refuses to guess (see resolve_organization).
+@app.get("/api/h9n/me", response_model=CurrentUser)
+def current_user(user: AuthenticatedUser = Depends(get_current_user)) -> CurrentUser:
+    return CurrentUser(
+        user_id=user.user_id,
+        organizations=[OrganizationOut(id=org.id, name=org.name) for org in organizations_of(user)],
+    )
+
+
 # Milestone 2.1: the deals the caller's organizations own, most recently
 # saved first, so a reviewer can reopen one in the web app. Deals saved
 # without an owner (before Milestone 2.5) are left out, as they are by every
@@ -268,12 +292,14 @@ def _require_deal_access(deal_id: str, user: AuthenticatedUser) -> None:
 def list_repe_deals(user: AuthenticatedUser = Depends(get_current_user)) -> list[DealSummary]:
     summaries = []
     for deal_id in _review_store.list_ids():
-        if _review_store.owner_of(deal_id) not in user.organization_ids:
+        owner = _review_store.owner_of(deal_id)
+        if owner not in user.organization_ids:
             continue
         deal = _review_store.get(deal_id)
         summaries.append(
             DealSummary(
                 deal_id=deal_id,
+                organization_id=owner,
                 deal_name=deal.deal_name,
                 property_name=deal.property_name,
                 review_status=deal.review_status,

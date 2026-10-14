@@ -44,6 +44,7 @@ def test_lists_the_callers_deals_most_recently_saved_first(store):
     assert [row["deal_id"] for row in body] == [newer, older]
     assert body[1] == {
         "deal_id": older,
+        "organization_id": str(TEST_ORGANIZATION_ID),
         "deal_name": "Older",
         "property_name": "Elm Court",
         "review_status": "approved",

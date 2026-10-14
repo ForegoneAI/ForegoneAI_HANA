@@ -77,6 +77,19 @@ class SupabaseAuthService:
         )
         return frozenset(UUID(row["organization_id"]) for row in response.data or [])
 
+    def organization_names(self, organization_ids: frozenset[UUID]) -> dict[UUID, str]:
+        """Return each organization's display name, for the web app's
+        organization picker."""
+        if not organization_ids:
+            return {}
+        response = (
+            self._client.table("organizations")
+            .select("id, name")
+            .in_("id", sorted(str(organization_id) for organization_id in organization_ids))
+            .execute()
+        )
+        return {UUID(row["id"]): row["name"] for row in response.data or []}
+
 
 @lru_cache
 def get_auth_service() -> SupabaseAuthService:
@@ -110,6 +123,26 @@ def get_current_user(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return AuthenticatedUser(user_id=user_id, organization_ids=organization_ids)
+
+
+@dataclass(frozen=True)
+class Organization:
+    id: UUID
+    name: str
+
+
+def organizations_of(user: AuthenticatedUser) -> list[Organization]:
+    """The organizations a signed-in user may act for, by name, so the web app
+    can ask which one an upload is for when there are several."""
+    try:
+        names = get_auth_service().organization_names(user.organization_ids)
+    except RagConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    organizations = [
+        Organization(id=organization_id, name=names.get(organization_id, str(organization_id)))
+        for organization_id in user.organization_ids
+    ]
+    return sorted(organizations, key=lambda organization: (organization.name.lower(), str(organization.id)))
 
 
 def resolve_organization(user: AuthenticatedUser, requested: UUID | None) -> UUID:
