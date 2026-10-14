@@ -40,6 +40,8 @@ class NewDeal(BaseModel):
     profile: REPEDealProfile
     source_filename: str
     source_pages: Optional[list[dict[str, Any]]] = None
+    # Where the uploaded PDF is kept (Milestone 2.3), or None if it wasn't.
+    source_storage_path: Optional[str] = None
     extraction_run_id: Optional[UUID] = None
     created_by: UUID
 
@@ -54,6 +56,8 @@ class DealRecord(BaseModel):
     profile: REPEDealProfile
     source_filename: str
     source_pages: Optional[list[dict[str, Any]]] = None
+    # Where the uploaded PDF is kept (Milestone 2.3), or None if it wasn't.
+    source_storage_path: Optional[str] = None
     extraction_run_id: Optional[UUID] = None
     created_by: UUID
     created_at: datetime
