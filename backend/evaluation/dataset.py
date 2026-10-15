@@ -36,8 +36,12 @@ def read_json(path: Path):
 
 
 def sha256(path: Path) -> str:
+    # Chunked rather than hashlib.file_digest, which needs Python 3.11+.
+    digest = hashlib.sha256()
     with path.open("rb") as source:
-        return hashlib.file_digest(source, "sha256").hexdigest()
+        for block in iter(lambda: source.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def approved(label: dict) -> bool:
@@ -116,49 +120,54 @@ def load_dataset(root: Path = DEFAULT_ROOT) -> Dataset:
     for case in cases:
         cid, split, family = case["case_id"], case["split"], case["family_id"]
         if split not in ("dev", "holdout", "diagnostic"):
-            raise ValueError("Invalid split")
+            raise ValueError(f"{cid}: Invalid split")
         if family in families and families[family] != split:
-            raise ValueError("Family split leakage")
+            raise ValueError(f"{cid}: Family split leakage")
         families[family] = split
         if not case["documents"] or len(set(case["documents"])) != len(case["documents"]):
-            raise ValueError("Case needs unique source document IDs")
+            raise ValueError(f"{cid}: Case needs unique source document IDs")
         if not case["requested_fields"] or set(case["requested_fields"]) != set(labels[cid]) or set(labels[cid]) != set(evidence[cid]):
-            raise ValueError("Field/evidence schema mismatch")
+            raise ValueError(f"{cid}: Field/evidence schema mismatch")
         for did in case["documents"]:
             digest = documents[did]["sha256"]
             if digest in hash_splits and hash_splits[digest] != split:
-                raise ValueError("Duplicate source split leakage")
+                raise ValueError(f"{cid}: Duplicate source split leakage")
             hash_splits[digest] = split
         for name, gold in labels[cid].items():
-            locs = evidence[cid][name]["locations"]
-            status, value = gold["status"], gold["value"]
-            tolerance = gold["abs_tolerance"]
-            if status not in ("present", "missing", "conflict"):
-                raise ValueError("Invalid label status")
-            if not isinstance(gold.get("unit"), str) or not gold["unit"] or gold["unit"] != case["requested_fields"][name]["unit"]:
-                raise ValueError("Label/spec unit mismatch")
-            if type(tolerance) not in (int, float) or not math.isfinite(tolerance) or tolerance < 0:
-                raise ValueError("Invalid tolerance")
-            if status == "present" and (value is None or gold.get("candidates")):
-                raise ValueError("Present label requires value and no candidates")
-            if status == "conflict":
-                candidates = gold.get("candidates")
-                if value is not None or not isinstance(candidates, list) or len(candidates) < 2 or any(v is None for v in candidates):
-                    raise ValueError("Conflict requires null value and multiple candidates")
-            if status == "missing" and (value is not None or locs or gold.get("candidates")):
-                raise ValueError("Malformed missing label")
-            if not isinstance(locs, list) or (status != "missing" and not locs):
-                raise ValueError("Missing evidence")
-            for loc in locs:
-                if location_key(loc) is None or loc["document_id"] not in case["documents"]:
-                    raise ValueError("Invalid evidence locator")
-                suffix = Path(documents[loc["document_id"]]["path"]).suffix.lower()
-                if ("page" in loc and suffix != ".pdf") or ("cell" in loc and suffix != ".xlsx"):
-                    raise ValueError("Evidence type does not match source")
-                if "cell" in loc and not re.fullmatch(r"[A-Za-z]+[1-9][0-9]*", loc["cell"]):
-                    raise ValueError("Invalid workbook cell")
-            if gold["review_status"] not in ("pending_domain_review", "approved"):
-                raise ValueError("Invalid review status")
-            if gold["review_status"] == "approved" and not approved(gold):
-                raise ValueError("Approval requires reviewer and ISO review date")
+            try:
+                locs = evidence[cid][name]["locations"]
+                status, value = gold["status"], gold["value"]
+                tolerance = gold["abs_tolerance"]
+                if status not in ("present", "missing", "conflict"):
+                    raise ValueError("Invalid label status")
+                if not isinstance(gold.get("unit"), str) or not gold["unit"] or gold["unit"] != case["requested_fields"][name]["unit"]:
+                    raise ValueError("Label/spec unit mismatch")
+                if type(tolerance) not in (int, float) or not math.isfinite(tolerance) or tolerance < 0:
+                    raise ValueError("Invalid tolerance")
+                if status == "present" and (value is None or gold.get("candidates")):
+                    raise ValueError("Present label requires value and no candidates")
+                if status == "conflict":
+                    candidates = gold.get("candidates")
+                    if value is not None or not isinstance(candidates, list) or len(candidates) < 2 or any(v is None for v in candidates):
+                        raise ValueError("Conflict requires null value and multiple candidates")
+                if status == "missing" and (value is not None or locs or gold.get("candidates")):
+                    raise ValueError("Malformed missing label")
+                if not isinstance(locs, list) or (status != "missing" and not locs):
+                    raise ValueError("Missing evidence")
+                for loc in locs:
+                    if location_key(loc) is None or loc["document_id"] not in case["documents"]:
+                        raise ValueError("Invalid evidence locator")
+                    suffix = Path(documents[loc["document_id"]]["path"]).suffix.lower()
+                    if ("page" in loc and suffix != ".pdf") or ("cell" in loc and suffix != ".xlsx"):
+                        raise ValueError("Evidence type does not match source")
+                    if "cell" in loc and not re.fullmatch(r"[A-Za-z]+[1-9][0-9]*", loc["cell"]):
+                        raise ValueError("Invalid workbook cell")
+                if gold["review_status"] not in ("pending_domain_review", "approved"):
+                    raise ValueError("Invalid review status")
+                if gold["review_status"] == "approved" and not approved(gold):
+                    raise ValueError("Approval requires reviewer and ISO review date")
+            except (ValueError, KeyError, TypeError) as exc:
+                # Name the row, so a bad edit in a 96-row review is easy to find.
+                raise ValueError(f"{cid}.{name}: {exc}") from None
+
     return Dataset(root, config["dataset_version"], cases, documents, labels, evidence)

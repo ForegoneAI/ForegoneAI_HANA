@@ -48,6 +48,17 @@ The comparison section of `report.md` lists every metric's change and every
 field whose value or evidence outcome flipped. It warns when the dataset
 version, split, or answer-key hashes differ from the baseline.
 
+A live run saves `predictions.json` after every case. If it stops partway
+(crash, timeout, Ctrl-C), rerun the same command with
+`--resume <that predictions.json>`: finished cases are reused rather than paid
+for again, and only failed or missing cases are extracted. A resume file
+from a different model is refused.
+
+`--provider` without `--model` uses that provider's default model.
+`H9N_EXTRACTION_MODEL` applies only to the provider set in
+`H9N_EXTRACTION_PROVIDER`, so an Anthropic model ID is never sent to
+OpenRouter (or the reverse).
+
 ## Read the metrics
 
 Headline metrics keep every expected field in the denominator, including

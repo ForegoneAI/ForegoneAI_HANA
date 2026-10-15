@@ -553,3 +553,76 @@ def test_conflicting_passages_become_candidates_with_every_citation():
     withheld.reason, withheld.conflicting_values = "model_conflicting", [passage(6.5, 2)]
     field = hana_adapter.profile_fields(profile, case, incomplete_scope=False)["cap_rate"]
     assert field["status"] == "conflict" and "candidates" not in field
+
+
+def test_adapter_without_model_records_the_providers_default(monkeypatch):
+    from backend.app.h9n.extraction.repe_extractor import DEFAULT_OPENROUTER_MODEL
+    monkeypatch.setenv("H9N_EXTRACTION_PROVIDER", "anthropic")
+    monkeypatch.setattr(hana_adapter, "read_pdf", lambda p: [{"file_name": "f.pdf", "page_number": 1, "text": "No terms."}])
+    client = fake_client(tool_response(full_output()))
+    result = hana_adapter.extract({"documents": [{"document_id": "d", "path": "f.pdf"}],
+                                   "requested_fields": {"asking_price": {"unit": "USD"}}}, client=client, provider="openrouter")
+    assert result["metadata"]["requested_model"] == DEFAULT_OPENROUTER_MODEL
+    assert client.messages.create.call_args.kwargs["model"] == DEFAULT_OPENROUTER_MODEL
+
+
+def test_cost_falls_back_to_the_requested_models_rate():
+    call = {"model": "anthropic/claude-4.5-sonnet-20250929", "requested_model": "anthropic/claude-sonnet-4.5",
+            "input_tokens": 1_000_000, "output_tokens": 0}
+    pricing = {"anthropic/claude-sonnet-4.5": {"input_per_million": 3.0, "output_per_million": 15.0}}
+    assert model_cost({"usage": [call]}, pricing) == pytest.approx(3.0)
+    from backend.evaluation.benchmark import unpriced_models
+    assert unpriced_models({"c": {"usage": [call]}}, pricing) == []
+    assert unpriced_models({"c": {"usage": [call]}}, {}) == ["anthropic/claude-4.5-sonnet-20250929"]
+
+
+def test_live_run_saves_after_each_case_and_resume_skips_finished_ones(dataset_root, monkeypatch):
+    def add_case(config):
+        case = copy.deepcopy(config["cases"][0])
+        case.update(case_id="second")
+        config["cases"].append(case)
+    edit(dataset_root, "inputs/cases.json", add_case)
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"].update(second=copy.deepcopy(g["cases"]["example"])))
+    edit(dataset_root, "ground_truth/evidence.json", lambda e: e.update(second=copy.deepcopy(e["example"])))
+    calls = []
+
+    def crashes_on_second(case, **options):
+        calls.append(case["case_id"])
+        if case["case_id"] == "second":
+            raise KeyboardInterrupt  # Ctrl-C partway through a paid run
+        pred = predictions()["example"]
+        pred["metadata"] = {"requested_model": options.get("model")}
+        return pred
+
+    monkeypatch.setattr(hana_adapter, "extract", crashes_on_second)
+    out = dataset_root / "run"
+    args = ["--dataset", str(dataset_root), "--allow-draft", "--model", "m1", "--out", str(out)]
+    with pytest.raises(KeyboardInterrupt):
+        main(args)
+    saved = json.loads((out / "predictions.json").read_text())
+    assert list(saved) == ["example"]
+
+    def finishes(case, **options):
+        calls.append(case["case_id"])
+        pred = predictions()["example"]
+        pred["metadata"] = {"requested_model": options.get("model")}
+        return pred
+
+    monkeypatch.setattr(hana_adapter, "extract", finishes)
+    calls.clear()
+    assert main(args + ["--resume", str(out / "predictions.json")]) == 0
+    assert calls == ["second"]
+    report = json.loads((out / "report.json").read_text())
+    assert report["resumed_cases"] == ["example"]
+    assert report["metrics"]["field_accuracy"] == 1
+    # A different model can't silently resume another model's run.
+    with pytest.raises(SystemExit) as error:
+        main(["--dataset", str(dataset_root), "--allow-draft", "--model", "m2", "--out", str(dataset_root / "other"),
+              "--resume", str(out / "predictions.json")])
+    assert error.value.code == 2
+
+
+def test_dataset_errors_name_the_case_and_field(dataset_root):
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"]["example"]["asking_price"].update(unit="EUR"))
+    with pytest.raises(ValueError, match=r"^example\.asking_price: Label/spec unit mismatch"):
+        load_dataset(dataset_root)

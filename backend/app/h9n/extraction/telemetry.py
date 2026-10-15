@@ -42,4 +42,7 @@ def record_model_response(response: Any, requested_model: str) -> None:
         "cached_input_tokens": cached,
         "cache_creation_input_tokens": created,
         "output_tokens": getattr(usage, "output_tokens", None),
+        # A provider may report a different name (e.g. a dated version) than
+        # the one requested; cost falls back to the requested model's rate.
+        "requested_model": requested_model,
     })

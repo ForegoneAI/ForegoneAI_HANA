@@ -10,7 +10,6 @@ import argparse
 import importlib
 import json
 import math
-import os
 import statistics
 import subprocess
 import time
@@ -47,9 +46,30 @@ def scoped(rows: list[dict]) -> list[dict]:
 
 
 def unpriced_models(predictions: dict, pricing: dict) -> list[str]:
-    models = {call.get("model") for pred in predictions.values() for call in (pred.get("usage") or [])
-              if isinstance(call, dict)}
-    return sorted(m for m in models if isinstance(m, str) and not isinstance(pricing.get(m), dict))
+    """Reported models with no rate, either under their own name or (as
+    model_cost falls back to) the model that was requested."""
+    missing = set()
+    for pred in predictions.values():
+        for call in pred.get("usage") or []:
+            if not isinstance(call, dict) or not isinstance(call.get("model"), str):
+                continue
+            if not any(isinstance(pricing.get(name), dict) for name in (call["model"], call.get("requested_model"))
+                       if isinstance(name, str)):
+                missing.add(call["model"])
+    return sorted(missing)
+
+
+def resumable(saved: dict, cid: str) -> dict | None:
+    """A completed, error-free prediction from an interrupted run."""
+    pred = saved.get(cid) if isinstance(saved, dict) else None
+    return pred if isinstance(pred, dict) and isinstance(pred.get("fields"), dict) and not pred.get("error") else None
+
+
+def write_json_atomic(path: Path, value) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def provenance() -> dict:
@@ -88,15 +108,22 @@ def validate_thresholds(rules: dict) -> None:
             raise ValueError(f"Inverted threshold: {name}")
 
 
-def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, thresholds=None) -> tuple[dict, dict]:
+def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, thresholds=None,
+        resume=None, on_prediction=None) -> tuple[dict, dict]:
+    """`resume` reuses completed cases of an interrupted live run instead of
+    paying for them again; `on_prediction` sees the predictions after every
+    case so a crash or Ctrl-C keeps what has been extracted so far."""
     results, predictions, all_rows = [], {}, []
     for case in cases:
         cid = case["case_id"]
         start = time.perf_counter()
         error = None
         pred = {"fields": {}}
+        reused = resumable(resume, cid) if adapter else None
         try:
-            if adapter:
+            if reused is not None:
+                pred = reused
+            elif adapter:
                 pred = adapter(dataset.payload(case))
             else:
                 if cid not in cached:
@@ -114,7 +141,7 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         except Exception as exc:  # Batch isolation; every failed case is scored.
             pred = {"fields": {}}
             error = f"{type(exc).__name__}: {exc}"
-        latency = time.perf_counter() - start if adapter else pred.get("latency_seconds")
+        latency = time.perf_counter() - start if adapter and reused is None else pred.get("latency_seconds")
         if type(latency) not in (int, float) or not math.isfinite(latency) or latency < 0:
             latency = None
         pred["latency_seconds"] = latency
@@ -136,6 +163,8 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
                         "error": error, "unexpected_fields": extras, "fields": rows,
                         "extraction_metadata": pred.get("metadata", {})})
         predictions[cid] = pred
+        if on_prediction:
+            on_prediction(predictions)
     metrics = summarize(all_rows)
     latencies = [r["latency_seconds"] for r in results if r["latency_seconds"] is not None]
     costs = [r["approx_model_cost_usd"] for r in results if r["approx_model_cost_usd"] is not None]
@@ -208,7 +237,7 @@ def _cell(value) -> str:
 def write_report(out: Path, report: dict, predictions: dict) -> None:
     out.mkdir(parents=True, exist_ok=True)
     for name, value in (("report.json", report), ("predictions.json", predictions)):
-        (out / name).write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+        write_json_atomic(out / name, value)
     model = report.get("requested_model") or (report["cases"][0]["extraction_metadata"].get("requested_model")
                                               if report["cases"] and isinstance(report["cases"][0]["extraction_metadata"], dict) else None)
     lines = ["# Extraction evaluation", f"\nStatus: **{report['label_status']}** | Split: {report['split']}",
@@ -269,6 +298,8 @@ def main(argv=None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--adapter", help=f"module:function (default: {DEFAULT_ADAPTER})")
     mode.add_argument("--predictions", type=Path, help="Replay a saved predictions.json without model calls")
+    parser.add_argument("--resume", type=Path,
+                        help="predictions.json from an interrupted live run; completed cases aren't extracted again")
     parser.add_argument("--provider", choices=["anthropic", "openrouter"], help="Extraction provider for the production adapter")
     parser.add_argument("--model", help="Model ID for the production adapter; use author/model for OpenRouter")
     pricing_group = parser.add_mutually_exclusive_group()
@@ -280,6 +311,8 @@ def main(argv=None) -> int:
     parser.add_argument("--unlock-holdout", action="store_true")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
+    if args.resume and args.predictions:
+        parser.error("--resume continues a live run; --predictions replays one. Use one of them.")
     if (args.model or args.provider) and (args.predictions or (args.adapter and args.adapter != DEFAULT_ADAPTER)):
         parser.error("--provider and --model apply to the production extraction adapter only.")
     if args.split == "holdout" and not args.unlock_holdout:
@@ -302,6 +335,9 @@ def main(argv=None) -> int:
         cached = read_json(args.predictions) if args.predictions else {}
         if not isinstance(cached, dict):
             raise ValueError("Saved predictions must map case IDs to predictions")
+        resume = read_json(args.resume) if args.resume else None
+        if resume is not None and not isinstance(resume, dict):
+            raise ValueError("--resume needs a predictions.json written by this command")
         adapter, adapter_name = None, args.adapter or DEFAULT_ADAPTER
         if not args.predictions:
             dataset.verify_sources(cases)
@@ -315,13 +351,17 @@ def main(argv=None) -> int:
             if args.model:
                 options["model"] = args.model
             elif args.provider:
-                from backend.app.h9n.extraction.repe_extractor import (
-                    DEFAULT_ANTHROPIC_MODEL, DEFAULT_MODEL, DEFAULT_OPENROUTER_MODEL,
-                )
-                configured_provider = os.environ.get("H9N_EXTRACTION_PROVIDER", "anthropic").strip().lower()
-                options["model"] = DEFAULT_MODEL if args.provider == configured_provider else (
-                    DEFAULT_OPENROUTER_MODEL if args.provider == "openrouter" else DEFAULT_ANTHROPIC_MODEL
-                )
+                # Same rule production uses, so a run names the model it really called.
+                from backend.app.h9n.extraction.repe_extractor import default_model_for
+                options["model"] = default_model_for(args.provider)
+            if resume and adapter_name == DEFAULT_ADAPTER:
+                # Never mix two models' outputs in one report.
+                from backend.app.h9n.extraction.repe_extractor import default_model_for
+                model = options.get("model") or default_model_for(options.get("provider"))
+                other = sorted({str(pred.get("metadata", {}).get("requested_model")) for cid, pred in resume.items()
+                                if resumable(resume, cid) and pred.get("metadata", {}).get("requested_model") != model})
+                if other:
+                    raise ValueError(f"--resume file was extracted with {', '.join(other)}, not {model}")
             if options:
                 adapter = partial(adapter, **options)
     except (ValueError, KeyError, TypeError, OSError, ImportError, AttributeError) as exc:
@@ -331,9 +371,16 @@ def main(argv=None) -> int:
     paths = ["ground_truth/labels.json", "ground_truth/evidence.json", "inputs/cases.json", "inputs/manifest.json"]
     hashes = {name: sha256(dataset.root / name) for name in paths}
     context = provenance()
-    report, predictions = run(dataset, cases, adapter=adapter, cached=cached, pricing=pricing, thresholds=thresholds)
+    run_id = str(uuid.uuid4())
+    out = args.out or Path(__file__).parent / "reports" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + run_id[:8])
+    # Saved after every case: a crash, timeout or Ctrl-C mid-run keeps the
+    # paid-for extractions, and --resume picks up from this file.
+    save_progress = (lambda predictions: write_json_atomic(out / "predictions.json", predictions)) if adapter else None
+    report, predictions = run(dataset, cases, adapter=adapter, cached=cached, pricing=pricing, thresholds=thresholds,
+                              resume=resume, on_prediction=save_progress)
     report.update({
-        "run_id": str(uuid.uuid4()), "dataset_version": dataset.version, "split": args.split,
+        "run_id": run_id, "resumed_cases": sorted(c["case_id"] for c in cases if adapter and resumable(resume, c["case_id"])),
+        "dataset_version": dataset.version, "split": args.split,
         "label_status": "domain_approved" if is_approved else "DRAFT_NOT_DOMAIN_APPROVED",
         "run_kind": "live_adapter" if adapter else "saved_predictions", "adapter": adapter_name if adapter else None,
         "requested_provider": args.provider, "requested_model": args.model,
@@ -355,7 +402,6 @@ def main(argv=None) -> int:
     })
     if baseline is not None:
         report["comparison"] = compare(report, baseline)
-    out = args.out or Path(__file__).parent / "reports" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + report["run_id"][:8])
     write_report(out, report, predictions)
     print(json.dumps({"status": report["label_status"], "metrics": report["metrics"], "report": str(out / "report.md")}, indent=2))
     return int(bool(report["threshold_failures"] or any(c["error"] or c["unexpected_fields"] for c in report["cases"])))

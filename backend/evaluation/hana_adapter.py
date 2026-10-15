@@ -11,8 +11,8 @@ import os
 from typing import Any
 
 from backend.app.h9n.extraction.repe_extractor import (
-    DEFAULT_MODEL,
     ExtractionError,
+    default_model_for,
     extract_repe_deal,
     extraction_input_sha256,
     extraction_prompt_sha256,
@@ -103,7 +103,8 @@ def profile_fields(profile, case: dict, *, incomplete_scope: bool) -> dict:
     return fields
 
 
-def extract(case: dict, *, client: Any = None, model: str = DEFAULT_MODEL, provider: str | None = None) -> dict:
+def extract(case: dict, *, client: Any = None, model: str | None = None, provider: str | None = None) -> dict:
+    model = model or default_model_for(provider)
     skipped = [d["document_id"] for d in case["documents"] if Path(d["path"]).suffix.lower() != ".pdf"]
     result = {
         "fields": {}, "execution_kind": "hana_production_pdf", "usage": [],

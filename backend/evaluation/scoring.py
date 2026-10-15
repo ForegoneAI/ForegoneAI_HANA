@@ -152,6 +152,8 @@ def model_cost(pred: dict, pricing: dict) -> float | None:
         if not isinstance(call, dict) or not isinstance(call.get("model"), str):
             return None
         rate = pricing.get(call["model"])
+        if not isinstance(rate, dict) and isinstance(call.get("requested_model"), str):
+            rate = pricing.get(call["requested_model"])
         if not isinstance(rate, dict):
             return None
         inp, out = call.get("input_tokens"), call.get("output_tokens")

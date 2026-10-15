@@ -21,7 +21,7 @@ from backend.app.h9n.extraction.repe_extractor import (
 )
 from backend.app.h9n.extraction.telemetry import capture_model_usage
 from backend.evaluation.benchmark import main
-from backend.tests.extraction_fakes import evidence, full_output
+from backend.tests.extraction_fakes import evidence, fake_client, full_output, tool_response
 
 PAGES = [{"file_name": "example.pdf", "page_number": 3, "text": "Asking price: $100.00"}]
 
@@ -192,3 +192,27 @@ def test_json_encoded_evidence_is_retried_with_object_hint():
     assert deal.asking_price == 100
     repair = bodies[1]["messages"][-1]["content"][0]["content"]
     assert "not a string containing JSON" in repair
+
+
+def test_default_model_follows_the_requested_provider(monkeypatch):
+    # H9N_EXTRACTION_MODEL names a model for the configured provider only;
+    # sending an Anthropic model ID to OpenRouter (or back) is never valid.
+    monkeypatch.setenv("H9N_EXTRACTION_PROVIDER", "anthropic")
+    monkeypatch.setenv("H9N_EXTRACTION_MODEL", "claude-custom-pin")
+    assert repe_extractor.default_model_for() == "claude-custom-pin"
+    assert repe_extractor.default_model_for("anthropic") == "claude-custom-pin"
+    assert repe_extractor.default_model_for("openrouter") == repe_extractor.DEFAULT_OPENROUTER_MODEL
+    monkeypatch.setenv("H9N_EXTRACTION_PROVIDER", "openrouter")
+    monkeypatch.setenv("H9N_EXTRACTION_MODEL", "google/pinned")
+    assert repe_extractor.default_model_for("anthropic") == repe_extractor.DEFAULT_ANTHROPIC_MODEL
+    monkeypatch.delenv("H9N_EXTRACTION_MODEL")
+    assert repe_extractor.default_model_for() == repe_extractor.DEFAULT_OPENROUTER_MODEL
+
+
+def test_provider_without_model_sends_that_providers_default(monkeypatch):
+    monkeypatch.setenv("H9N_EXTRACTION_PROVIDER", "anthropic")
+    monkeypatch.setenv("H9N_EXTRACTION_MODEL", "claude-custom-pin")
+    client = fake_client(tool_response(full_output()))
+    extract_repe_deal([{"file_name": "f.pdf", "page_number": 1, "text": "No terms are stated here."}],
+                      client=client, provider="openrouter")
+    assert client.messages.create.call_args.kwargs["model"] == repe_extractor.DEFAULT_OPENROUTER_MODEL

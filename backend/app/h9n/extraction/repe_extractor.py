@@ -74,11 +74,25 @@ load_dotenv(override=False)
 OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4.5"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
-DEFAULT_MODEL = os.environ.get("H9N_EXTRACTION_MODEL") or (
-    DEFAULT_OPENROUTER_MODEL
-    if os.environ.get("H9N_EXTRACTION_PROVIDER", "anthropic").strip().lower() == "openrouter"
-    else DEFAULT_ANTHROPIC_MODEL
-)
+
+
+def _configured_provider() -> str:
+    return os.environ.get("H9N_EXTRACTION_PROVIDER", "anthropic").strip().lower()
+
+
+def default_model_for(provider: str | None = None) -> str:
+    """The model to use when a caller names a provider but no model.
+    H9N_EXTRACTION_MODEL only applies to the configured provider: an
+    Anthropic model ID sent to OpenRouter (or the reverse) is never valid."""
+    provider = (provider or _configured_provider()).strip().lower()
+    configured = os.environ.get("H9N_EXTRACTION_MODEL")
+    if configured and provider == _configured_provider():
+        return configured
+    return DEFAULT_OPENROUTER_MODEL if provider == "openrouter" else DEFAULT_ANTHROPIC_MODEL
+
+
+# What extraction uses with no provider/model given (and what run records cite).
+DEFAULT_MODEL = default_model_for()
 
 # Every field now carries a citation, so the tool call is several times larger
 # than the bare profile. Output tokens are only billed when generated, so a
@@ -364,7 +378,7 @@ def _prepare_pages(pages: list[dict[str, Any]], *, caller: str = "extract_repe_d
 
 
 def _build_client(provider: str | None = None) -> anthropic.Anthropic:
-    provider = (provider or os.environ.get("H9N_EXTRACTION_PROVIDER", "anthropic")).strip().lower()
+    provider = (provider or _configured_provider()).strip().lower()
     if provider not in ("anthropic", "openrouter"):
         raise ExtractionConfigurationError("H9N_EXTRACTION_PROVIDER must be anthropic or openrouter.")
     if provider == "openrouter":
@@ -577,7 +591,7 @@ def extract_repe_deal(
     pages: list[dict[str, Any]],
     *,
     client: Optional[anthropic.Anthropic] = None,
-    model: str = DEFAULT_MODEL,
+    model: Optional[str] = None,
     provider: str | None = None,
 ) -> REPEDealProfile:
     """Sends page-preserved deal package text to Claude and returns a
@@ -594,6 +608,7 @@ def extract_repe_deal(
         from the configured provider's environment credentials.
     model:
         The provider's model ID, such as an OpenRouter author/model ID.
+        Defaults to `default_model_for(provider)`.
     provider:
         "anthropic" or "openrouter"; defaults to H9N_EXTRACTION_PROVIDER.
 
@@ -634,7 +649,7 @@ def extract_repe_deal(
 
     output = _call_tool(
         _prepare_client(client, provider),
-        model=model,
+        model=model or default_model_for(provider),
         system=SYSTEM_PROMPT,
         tool=_build_tool_schema(),
         prompt=(
@@ -716,7 +731,7 @@ def apply_reviewer_feedback(
     feedback: str,
     *,
     client: Optional[anthropic.Anthropic] = None,
-    model: str = DEFAULT_MODEL,
+    model: Optional[str] = None,
     provider: str | None = None,
 ) -> dict[str, Any]:
     """Given the original document pages, the current (reviewer-flagged)
@@ -770,7 +785,7 @@ def apply_reviewer_feedback(
 
     output = _call_tool(
         _prepare_client(client, provider),
-        model=model,
+        model=model or default_model_for(provider),
         system=FEEDBACK_SYSTEM_PROMPT,
         tool=_build_feedback_tool_schema(),
         prompt=(
