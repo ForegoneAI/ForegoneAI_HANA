@@ -25,3 +25,8 @@ deal_packages/
 
 # Logs
 *.log
+
+# Benchmark inputs stay local; version labels, evidence, and source hashes.
+backend/evaluation/benchmark_data/inputs/*.pdf
+backend/evaluation/benchmark_data/inputs/*.xlsx
+backend/evaluation/reports/

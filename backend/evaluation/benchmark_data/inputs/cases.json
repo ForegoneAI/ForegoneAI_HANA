@@ -1,0 +1,461 @@
+{
+  "dataset_version": "0.1.0-draft",
+  "cases": [
+    {
+      "case_id": "roderick",
+      "family_id": "roderick",
+      "split": "dev",
+      "kind": "deal_package",
+      "documents": [
+        "roderick_investor",
+        "roderick_pitch",
+        "roderick_onepager",
+        "roderick_market",
+        "roderick_model"
+      ],
+      "requested_fields": {
+        "target_equity_raise": {
+          "unit": "USD",
+          "description": "Portfolio target equity raise, not total capitalization."
+        },
+        "total_capital_stack": {
+          "unit": "USD",
+          "description": "Total stack with leverage as stated in investor deck."
+        },
+        "investor_deck_preferred_return": {
+          "unit": "ratio",
+          "description": "Investor deck stated preferred return; no assumption that it is annualized."
+        },
+        "investor_deck_duration_months": {
+          "unit": "months",
+          "description": "Investor deck duration range, preserve both endpoints."
+        },
+        "pitch_term_months": {
+          "unit": "months",
+          "description": "Overall term in pitch executive summary, distinct from Phase 1."
+        },
+        "pitch_preferred_return": {
+          "unit": "ratio",
+          "description": "Preferred return range stated in pitch summary."
+        },
+        "pitch_target_irr": {
+          "unit": "ratio",
+          "description": "Target IRR as stated, not independently validated."
+        },
+        "lot15_pitch_land_cost": {
+          "unit": "USD",
+          "description": "lot15 pitch land cost"
+        },
+        "lot15_pitch_build_cost": {
+          "unit": "USD",
+          "description": "lot15 pitch build cost"
+        },
+        "lot15_pitch_total_cost": {
+          "unit": "USD",
+          "description": "lot15 pitch total cost"
+        },
+        "lot15_pitch_sale_lower_bound": {
+          "unit": "USD",
+          "description": "Projected sell has a plus sign; this field is the lower bound, not an exact sale price."
+        },
+        "lot15_base_build_area": {
+          "unit": "sqft",
+          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+        },
+        "lot15_base_build_cost": {
+          "unit": "USD",
+          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+        },
+        "lot15_base_total_cost": {
+          "unit": "USD",
+          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+        },
+        "lot15_base_revenue": {
+          "unit": "USD",
+          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+        },
+        "lot15_base_net": {
+          "unit": "USD",
+          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result."
+        },
+        "lot15_bear_net": {
+          "unit": "USD",
+          "description": "Bearish scenario, not base."
+        },
+        "community_base_land_outflow": {
+          "unit": "USD",
+          "description": "Use exact sheet spelling; preserve negative outflow."
+        },
+        "reconciled_lot15_build_cost": {
+          "unit": "USD",
+          "description": "Resolve reconciled lot15 build cost: if supplied sources disagree, report conflict with all distinct candidate values and their evidence."
+        },
+        "reconciled_term_months": {
+          "unit": "months",
+          "description": "Resolve reconciled term months: if supplied sources disagree, report conflict with all distinct candidate values and their evidence."
+        },
+        "committed_bank_lender": {
+          "unit": "text",
+          "description": "committed bank lender. Extract only if supported by the supplied sources; otherwise report missing."
+        },
+        "executed_loan_interest_rate": {
+          "unit": "ratio",
+          "description": "executed loan interest rate. Extract only if supported by the supplied sources; otherwise report missing."
+        }
+      }
+    },
+    {
+      "case_id": "opulent",
+      "family_id": "opulent",
+      "split": "dev",
+      "kind": "deal_package",
+      "documents": [
+        "opulent_deck",
+        "opulent_investor",
+        "opulent_model"
+      ],
+      "requested_fields": {
+        "land_area": {
+          "unit": "sqm",
+          "description": "Source-stated land area. Do not reconcile with other sources in this source-specific field."
+        },
+        "villa_keys": {
+          "unit": "count",
+          "description": "Source-stated villa keys. Do not reconcile with other sources in this source-specific field."
+        },
+        "residence_keys": {
+          "unit": "count",
+          "description": "Source-stated residence keys. Do not reconcile with other sources in this source-specific field."
+        },
+        "hotel_keys": {
+          "unit": "count",
+          "description": "Source-stated hotel keys. Do not reconcile with other sources in this source-specific field."
+        },
+        "total_keys": {
+          "unit": "count",
+          "description": "Source-stated total keys. Do not reconcile with other sources in this source-specific field."
+        },
+        "deck_total_development_cost": {
+          "unit": "USD",
+          "description": "Source-stated deck total development cost. Do not reconcile with other sources in this source-specific field."
+        },
+        "deck_capital_raise": {
+          "unit": "USD",
+          "description": "Source-stated deck capital raise. Do not reconcile with other sources in this source-specific field."
+        },
+        "deck_lp_equity_raise": {
+          "unit": "USD",
+          "description": "Source-stated deck lp equity raise. Do not reconcile with other sources in this source-specific field."
+        },
+        "secured_presales": {
+          "unit": "USD",
+          "description": "Source-stated secured presales. Do not reconcile with other sources in this source-specific field."
+        },
+        "presale_lois": {
+          "unit": "USD",
+          "description": "Source-stated presale lois. Do not reconcile with other sources in this source-specific field."
+        },
+        "optional_bridge_escrow": {
+          "unit": "USD",
+          "description": "Source-stated optional bridge escrow. Do not reconcile with other sources in this source-specific field."
+        },
+        "deck_year5_revenue": {
+          "unit": "USD",
+          "description": "Source-stated deck year5 revenue. Do not reconcile with other sources in this source-specific field."
+        },
+        "deck_year5_ebitda": {
+          "unit": "USD",
+          "description": "Source-stated deck year5 ebitda. Do not reconcile with other sources in this source-specific field."
+        },
+        "deck_exit_valuation": {
+          "unit": "USD",
+          "description": "Source-stated deck exit valuation. Do not reconcile with other sources in this source-specific field."
+        },
+        "deck_exit_cap_rate": {
+          "unit": "ratio",
+          "description": "Source-stated deck exit cap rate. Do not reconcile with other sources in this source-specific field."
+        },
+        "soft_opening_year": {
+          "unit": "year",
+          "description": "Source-stated soft opening year. Do not reconcile with other sources in this source-specific field."
+        },
+        "model_occupancy": {
+          "unit": "ratio",
+          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+        },
+        "model_year5_revenue": {
+          "unit": "USD",
+          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+        },
+        "model_year5_ebitda": {
+          "unit": "USD",
+          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+        },
+        "model_exit_valuation": {
+          "unit": "USD",
+          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+        },
+        "model_lp_equity_share": {
+          "unit": "ratio",
+          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed."
+        },
+        "reconciled_year5_revenue": {
+          "unit": "USD",
+          "description": "Resolve reconciled year5 revenue: if supplied sources disagree, report conflict with all distinct candidate values and their evidence."
+        },
+        "reconciled_total_cost": {
+          "unit": "USD",
+          "description": "Resolve reconciled total cost: if supplied sources disagree, report conflict with all distinct candidate values and their evidence."
+        },
+        "executed_senior_loan_rate": {
+          "unit": "ratio",
+          "description": "executed senior loan rate. Extract only if supported by the supplied sources; otherwise report missing."
+        },
+        "signed_land_deed_date": {
+          "unit": "date",
+          "description": "signed land deed date. Extract only if supported by the supplied sources; otherwise report missing."
+        }
+      }
+    },
+    {
+      "case_id": "daly_city",
+      "family_id": "daly_city",
+      "split": "dev",
+      "kind": "single_document_deal",
+      "documents": [
+        "daly_city"
+      ],
+      "requested_fields": {
+        "asking_price": {
+          "unit": "USD",
+          "description": "asking price"
+        },
+        "building_area": {
+          "unit": "sqft",
+          "description": "building area"
+        },
+        "lot_area": {
+          "unit": "acres",
+          "description": "lot area"
+        },
+        "units": {
+          "unit": "count",
+          "description": "units"
+        },
+        "average_unit_area": {
+          "unit": "sqft",
+          "description": "average unit area"
+        },
+        "year_built": {
+          "unit": "year",
+          "description": "year built"
+        },
+        "parking_spaces": {
+          "unit": "count",
+          "description": "parking spaces"
+        },
+        "lp_preferred_return": {
+          "unit": "ratio",
+          "description": "lp preferred return. Extract only if supported by the supplied sources; otherwise report missing."
+        },
+        "lp_minimum_subscription": {
+          "unit": "USD",
+          "description": "lp minimum subscription. Extract only if supported by the supplied sources; otherwise report missing."
+        }
+      }
+    },
+    {
+      "case_id": "chicago",
+      "family_id": "chicago",
+      "split": "holdout",
+      "kind": "single_document_deal",
+      "documents": [
+        "chicago"
+      ],
+      "requested_fields": {
+        "units": {
+          "unit": "count",
+          "description": "units"
+        },
+        "asking_price": {
+          "unit": "USD",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "current_cap_rate": {
+          "unit": "ratio",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "proforma_cap_rate": {
+          "unit": "ratio",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "current_noi": {
+          "unit": "USD",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "proforma_noi": {
+          "unit": "USD",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "current_scheduled_gross_income": {
+          "unit": "USD",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "proforma_scheduled_gross_income": {
+          "unit": "USD",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "modeled_loan_amount": {
+          "unit": "USD",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "modeled_interest_rate": {
+          "unit": "ratio",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "modeled_amortization_years": {
+          "unit": "years",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "current_debt_coverage_ratio": {
+          "unit": "multiple",
+          "description": "Resolve current debt coverage ratio: if supplied sources disagree, report conflict with all distinct candidate values and their evidence."
+        },
+        "lp_preferred_return": {
+          "unit": "ratio",
+          "description": "lp preferred return. Extract only if supported by the supplied sources; otherwise report missing."
+        },
+        "lp_minimum_subscription": {
+          "unit": "USD",
+          "description": "lp minimum subscription. Extract only if supported by the supplied sources; otherwise report missing."
+        }
+      }
+    },
+    {
+      "case_id": "corporate_place",
+      "family_id": "corporate_place",
+      "split": "holdout",
+      "kind": "single_document_deal",
+      "documents": [
+        "corporate_place"
+      ],
+      "requested_fields": {
+        "asking_price": {
+          "unit": "USD",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "current_cap_rate": {
+          "unit": "ratio",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "current_noi": {
+          "unit": "USD",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "rentable_area": {
+          "unit": "sqft",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "occupancy": {
+          "unit": "ratio",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "modeled_loan_amount": {
+          "unit": "USD",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "modeled_down_payment": {
+          "unit": "USD",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "modeled_interest_rate": {
+          "unit": "ratio",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "modeled_loan_term_years": {
+          "unit": "years",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "levered_irr": {
+          "unit": "ratio",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "unlevered_irr": {
+          "unit": "ratio",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "parking_spaces": {
+          "unit": "count",
+          "description": "parking spaces"
+        },
+        "lp_preferred_return": {
+          "unit": "ratio",
+          "description": "lp preferred return. Extract only if supported by the supplied sources; otherwise report missing."
+        },
+        "lp_minimum_subscription": {
+          "unit": "USD",
+          "description": "lp minimum subscription. Extract only if supported by the supplied sources; otherwise report missing."
+        }
+      }
+    },
+    {
+      "case_id": "townhomes",
+      "family_id": "anonymous_template",
+      "split": "diagnostic",
+      "kind": "anonymous_model_not_verified_deal",
+      "documents": [
+        "townhomes_model"
+      ],
+      "requested_fields": {
+        "units": {
+          "unit": "count",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "monthly_market_rent": {
+          "unit": "USD_per_month",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "rent_growth": {
+          "unit": "ratio",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "vacancy_credit_loss": {
+          "unit": "ratio",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "ltv": {
+          "unit": "ratio",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "unit_cost": {
+          "unit": "USD",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "loan_amount": {
+          "unit": "USD",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "interest_rate": {
+          "unit": "ratio",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "year2026_noi": {
+          "unit": "USD",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "year2026_free_cashflow": {
+          "unit": "USD",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "property_address": {
+          "unit": "text",
+          "description": "property address. Extract only if supported by the supplied sources; otherwise report missing."
+        },
+        "sponsor_legal_name": {
+          "unit": "text",
+          "description": "sponsor legal name. Extract only if supported by the supplied sources; otherwise report missing."
+        }
+      }
+    }
+  ]
+}
