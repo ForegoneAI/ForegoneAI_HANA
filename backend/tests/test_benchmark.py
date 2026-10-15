@@ -530,3 +530,26 @@ def test_review_import_rejects_an_undescribed_new_field(dataset_root):
     with pytest.raises(ValueError, match="need a known case"):
         import_review(dataset_root, path, "0.2")
     assert (dataset_root / "ground_truth/labels.json").read_bytes() == before
+
+
+def test_conflicting_passages_become_candidates_with_every_citation():
+    # Shaped like M1.2's WithheldValue.conflicting_values; built from plain
+    # objects so this runs against profiles with or without that field.
+    def passage(value, page):
+        return SimpleNamespace(value=value, evidence=SimpleNamespace(source_document="om.pdf", page_number=page))
+    withheld = SimpleNamespace(field_name="cap_rate", reason="conflicting_evidence",
+                               conflicting_values=[passage(6.5, 2), passage(7.0, 9), passage(6.5, 11)])
+    profile = SimpleNamespace(withheld_values=[withheld], conflicting_information=[], uncertain_information=[],
+                              evidence=[], cap_rate=None, asking_price=None)
+    case = {"documents": [{"document_id": "om", "path": "/x/om.pdf"}],
+            "requested_fields": {"cap_rate": {"unit": "ratio"}}}
+    field = hana_adapter.profile_fields(profile, case, incomplete_scope=False)["cap_rate"]
+    assert field["status"] == "conflict"
+    assert field["candidates"] == [pytest.approx(.065), pytest.approx(.07)]
+    assert {e["page"] for e in field["evidence"]} == {2, 9, 11}
+    gold = {"status": "conflict", "value": None, "candidates": [.07, .065], "unit": "ratio", "abs_tolerance": 0}
+    assert value_correct(field, gold)
+    # A model flag with a single passage stays a candidate-less conflict.
+    withheld.reason, withheld.conflicting_values = "model_conflicting", [passage(6.5, 2)]
+    field = hana_adapter.profile_fields(profile, case, incomplete_scope=False)["cap_rate"]
+    assert field["status"] == "conflict" and "candidates" not in field

@@ -19,6 +19,7 @@ from backend.app.h9n.extraction.repe_extractor import (
 )
 from backend.app.h9n.extraction.telemetry import capture_model_usage
 from backend.app.h9n.ingestion.pdf_reader import PdfReadError, read_pdf
+from backend.evaluation.scoring import equal
 
 # benchmark name -> (production name, benchmark unit, normalization factor).
 # Production stores percentages as 6.5; the supplied labels use ratio .065.
@@ -34,6 +35,9 @@ FIELD_MAP = {
     "ltv": ("ltv", "ratio", .01),
     "property_address": ("address", "text", 1),
 }
+# "conflicting_evidence" is M1.2's own cross-passage check; "model_conflicting"
+# is the model's flag. Both mean the document disagrees with itself.
+CONFLICT_REASONS = {"model_conflicting", "conflicting_evidence"}
 # Benchmark fields named after a production field test that field exactly as
 # REPEDealProfile defines it, so adding domain-reviewed rows with these names
 # (import_review.py) grows the scored scope without new semantic aliases.
@@ -68,11 +72,24 @@ def profile_fields(profile, case: dict, *, incomplete_scope: bool) -> dict:
                     for e in profile.evidence if e.field_name == source]
         if source in withheld:
             item = withheld[source]
-            status = "conflict" if item.reason == "model_conflicting" else "uncertain"
+            status = "conflict" if item.reason in CONFLICT_REASONS else "uncertain"
             fields[name] = {"status": status, "value": None, "unit": unit, "evidence": [], "reason": item.reason}
-            # Production currently retains one proposed value and a note,
-            # not the full candidate/evidence set. Do not parse notes or
-            # fabricate candidates to make conflict scoring pass.
+            # M1.2 keeps every disagreeing passage as `conflicting_values`
+            # (getattr: profiles from before M1.2 don't have it). Without at
+            # least two verified passages there is only one proposed value
+            # and a note; never parse notes or fabricate candidates.
+            passages = getattr(item, "conflicting_values", None) or []
+            if status == "conflict" and len(passages) >= 2:
+                candidates = []
+                for passage in passages:
+                    value = passage.value * factor if isinstance(passage.value, (int, float)) else passage.value
+                    if not any(equal(value, seen) for seen in candidates):
+                        candidates.append(value)
+                if len(candidates) >= 2:
+                    fields[name]["candidates"] = candidates
+                    fields[name]["evidence"] = [
+                        {"document_id": documents.get(p.evidence.source_document, p.evidence.source_document),
+                         "page": p.evidence.page_number} for p in passages]
         elif conflicting or uncertain:
             fields[name] = {"status": "conflict" if conflicting else "uncertain", "value": None,
                             "unit": unit, "evidence": [], "reason": "Production field flag requires review"}
@@ -97,7 +114,7 @@ def extract(case: dict, *, client: Any = None, model: str = DEFAULT_MODEL, provi
                      "unsupported_schema_fields": [name for name, spec in case["requested_fields"].items()
                                                    if name not in FIELD_MAP or FIELD_MAP[name][1] != spec["unit"]],
                      "limitations": ["Production accepts PDF text only; workbook evidence is not extracted.",
-                                     "Production conflict records do not expose all candidates and citations.",
+                                     "Conflict candidates are scored only when production keeps every disagreeing passage (M1.2).",
                                      "Source/scenario-specific financial fields are not mapped to generic profile fields."]},
     }
     with capture_model_usage() as usage:
