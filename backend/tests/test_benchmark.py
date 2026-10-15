@@ -626,3 +626,20 @@ def test_dataset_errors_name_the_case_and_field(dataset_root):
     edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"]["example"]["asking_price"].update(unit="EUR"))
     with pytest.raises(ValueError, match=r"^example\.asking_price: Label/spec unit mismatch"):
         load_dataset(dataset_root)
+
+
+def test_kept_value_with_only_a_possible_conflict_is_scored_by_its_value():
+    # Shaped like M1.2's PossibleConflict: the value stays stored, and its
+    # detail is also an uncertain_information note for the review form.
+    detail = "The same label gives a different figure elsewhere in the document: $1,500,000 (page 9)"
+    profile = SimpleNamespace(
+        noi=1_200_000, withheld_values=[], conflicting_information=[], asking_price=None,
+        uncertain_information=[f"noi: {detail}"],
+        possible_conflicts=[SimpleNamespace(field_name="noi", detail=detail)],
+        evidence=[SimpleNamespace(field_name="noi", source_document="om.pdf", page_number=4)])
+    case = {"documents": [{"document_id": "om", "path": "/x/om.pdf"}], "requested_fields": {"noi": {"unit": "USD"}}}
+    field = hana_adapter.profile_fields(profile, case, incomplete_scope=False)["noi"]
+    assert field == {"status": "present", "value": 1_200_000, "unit": "USD", "evidence": [{"document_id": "om", "page": 4}]}
+    # Any other uncertain note on the field still withholds it.
+    profile.uncertain_information.append("noi: rounded figure in the summary")
+    assert hana_adapter.profile_fields(profile, case, incomplete_scope=False)["noi"]["status"] == "uncertain"

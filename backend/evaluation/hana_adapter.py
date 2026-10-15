@@ -67,7 +67,15 @@ def profile_fields(profile, case: dict, *, incomplete_scope: bool) -> dict:
         # Flags can exist even when the model left the original value null,
         # in which case integrity enforcement creates no withheld record.
         conflicting = any(note.casefold().startswith(source + ":") for note in profile.conflicting_information)
-        uncertain = any(note.casefold().startswith(source + ":") for note in profile.uncertain_information)
+        # M1.2 keeps a value whose label shows a different figure elsewhere
+        # ("possible conflict") and adds an uncertain note for the reviewer.
+        # The stored value is still the extraction's answer, so it is scored
+        # by its value; only other uncertain notes withhold it. getattr: the
+        # field doesn't exist before M1.2 merges.
+        possible = {f"{entry.field_name}: {entry.detail}".casefold()
+                    for entry in getattr(profile, "possible_conflicts", None) or []}
+        uncertain = any(note.casefold().startswith(source + ":") and note.casefold() not in possible
+                        for note in profile.uncertain_information)
         evidence = [{"document_id": documents.get(e.source_document, e.source_document), "page": e.page_number}
                     for e in profile.evidence if e.field_name == source]
         if source in withheld:
