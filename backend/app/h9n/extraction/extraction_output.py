@@ -51,6 +51,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from backend.app.h9n.schemas.base_deal import (
     BOOKKEEPING_FIELDS,
+    POSSIBLE_CONFLICT_PREFIX,
     ConflictingValue,
     EvidenceVerification,
     FieldEvidence,
@@ -1018,7 +1019,7 @@ def _describe_conflict(value: Any, values: list[ConflictingValue], citation_prob
 
 def _describe_possible_conflict(values: list[ConflictingValue]) -> str:
     return (
-        f"The same label gives a different figure elsewhere in the document: {_listed(values)}. "
+        f"{POSSIBLE_CONFLICT_PREFIX}: {_listed(values)}. "
         "It may be another section's figure (e.g. pro forma, or another loan); confirm which one this field holds."
     )
 

@@ -46,6 +46,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.h9n.schemas.base_deal import (
     BOOKKEEPING_FIELDS,
+    POSSIBLE_CONFLICT_PREFIX,
     ConflictingValue,
     FieldEvidence,
     PossibleConflict,
@@ -235,10 +236,12 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
     reasons = []
     if possible is not None:
         reasons.append(FieldStatusReason(code="same_label_different_value", message=possible.detail))
+    # A possible-conflict note only mirrors its PossibleConflict entry, which
+    # is what counts: once a reviewer dismisses the entry, the note is moot.
     reasons += [
         FieldStatusReason(code="model_flagged_uncertain", message=note)
         for note in uncertain_notes
-        if not (possible and note in possible.detail)
+        if not note.startswith(POSSIBLE_CONFLICT_PREFIX)
     ]
     if withheld:
         if withheld.reason == "model_uncertain":

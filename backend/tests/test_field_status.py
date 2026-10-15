@@ -11,7 +11,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.h9n.extraction.extraction_output import VALUE_FIELDS, REPEExtractionOutput, enforce_integrity
-from backend.app.h9n.schemas.base_deal import ConflictingValue, FieldEvidence, PossibleConflict, WithheldValue
+from backend.app.h9n.schemas.base_deal import (
+    POSSIBLE_CONFLICT_PREFIX,
+    ConflictingValue,
+    FieldEvidence,
+    PossibleConflict,
+    WithheldValue,
+)
 from backend.app.h9n.schemas.field_status import (
     BOOKKEEPING_FIELDS,
     assess_field,
@@ -243,7 +249,7 @@ def test_a_possible_conflict_flags_a_stored_value_as_uncertain():
         ConflictingValue(value=1_200_000, evidence=_cite("noi", 1_200_000)),
         ConflictingValue(value=1_500_000, evidence=_cite("noi", 1_500_000, page_number=7)),
     ]
-    detail = "The same label gives a different figure elsewhere in the document: ..."
+    detail = f"{POSSIBLE_CONFLICT_PREFIX}: 1200000 (deal.pdf p.1), 1500000 (deal.pdf p.7). Confirm which."
     deal = REPEDealProfile(
         noi=1_200_000,
         evidence=[_cite("noi", 1_200_000)],
@@ -259,7 +265,10 @@ def test_a_possible_conflict_flags_a_stored_value_as_uncertain():
     assert report.conflicting_values == passages
     assert [e.page_number for e in report.evidence] == [1, 7]
 
-    # A reviewer confirming the value settles it.
+    # A reviewer dismissing it settles it, even though its note remains...
+    dismissed = deal.model_copy(update={"possible_conflicts": []})
+    assert _status(dismissed, "noi").status == "supported"
+    # ...and so does a reviewer confirming the value.
     deal.corrected_fields.append("noi")
     assert _status(deal, "noi").needs_review is False
 

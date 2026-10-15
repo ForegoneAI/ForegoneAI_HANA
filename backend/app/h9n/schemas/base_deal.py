@@ -113,6 +113,14 @@ class WithheldValue(BaseModel):
 # senior and a mezzanine "Loan Amount". That is often two different things
 # sharing a label rather than a contradiction, so the value is kept, but the
 # field needs a reviewer to confirm which figure it should hold.
+#
+# Its `detail` - repeated as an uncertain_information note so today's review
+# form shows it - always starts with POSSIBLE_CONFLICT_PREFIX. Field statuses
+# read the PossibleConflict itself, never that note, so removing the entry
+# (a reviewer dismissing it) settles the field.
+POSSIBLE_CONFLICT_PREFIX = "The same label gives a different figure elsewhere in the document"
+
+
 class PossibleConflict(BaseModel):
 
     field_name: str
