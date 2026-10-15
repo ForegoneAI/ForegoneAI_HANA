@@ -16,6 +16,10 @@
 - Mean/p95 latency and model cost accounting across returned model responses,
   including schema-repair attempts.
 - Saved-output replay, metric thresholds, dataset validation, and split checks.
+- `in_scope_*` metrics for the fields the production schema can express, next
+  to the headline metrics over every expected field.
+- `--compare` against an earlier run: metric deltas and per-field flips.
+- Default list-price pricing for the default models (`pricing.json`).
 - Reports with run IDs, dataset/source hashes, Git revision, package versions,
   and production model/prompt/input metadata.
 
@@ -29,7 +33,36 @@ python -m backend.evaluation.evaluate --allow-draft --out backend/evaluation/rep
 
 This uses the configured provider and `H9N_EXTRACTION_MODEL` to call the production
 PDF extractor. `--allow-draft` enables scoring against the bundled draft labels.
-Live evaluation makes billable model calls and saves reports locally.
+Live evaluation makes billable model calls and saves reports locally. Restore
+the source files first (see [Restore source files](#restore-source-files)).
+
+After a prompt or model change, rerun and compare with the previous report:
+
+```bash
+python -m backend.evaluation.evaluate --allow-draft \
+  --compare backend/evaluation/reports/hana-dev/report.json \
+  --out backend/evaluation/reports/hana-dev-new-prompt
+```
+
+The comparison section of `report.md` lists every metric's change and every
+field whose value or evidence outcome flipped. It warns when the dataset
+version, split, or answer-key hashes differ from the baseline.
+
+## Read the metrics
+
+Headline metrics keep every expected field in the denominator, including
+fields the production `REPEDealProfile` has no field for (for example
+`lot15_pitch_land_cost` or `proforma_noi`). The adapter lists those as
+`unsupported_schema_fields`, and the `in_scope_*` metrics repeat field
+accuracy, grounded accuracy, evidence accuracy, and coverage for the rest.
+`extractor_scope_share` is the fraction of expected fields in scope.
+
+Dataset 0.1.0-draft has 14 in-scope fields out of 96, and only 4 of the 56
+dev-split fields (all Daly City). Roderick and Opulent are development and
+hospitality packages whose terms the REPE profile can't hold yet. Treat
+`in_scope_*` as the signal for prompt/model changes, and grow it by adding
+domain-reviewed rows named after profile fields (see
+[Add fields](#add-fields)).
 
 ## Evaluate models with OpenRouter
 
@@ -64,20 +97,29 @@ To make it the default for extraction and evaluation, set
 
 Outputs:
 
-- `report.md`: metric and case summary.
+- `report.md`: metrics, cases, every field's expected/predicted outcome, and any comparison.
 - `report.json`: field-level comparisons, evidence, metrics, and run metadata.
 - `predictions.json`: extraction output, model usage, and latency for replay.
 
 ## Restore source files
 
 Source files and generated reports are ignored by Git. Restore inputs on a
-new checkout using the supplied ZIP:
+new checkout from any of these (they can be combined):
 
 ```bash
+# The supplied benchmark pack
 python -m backend.evaluation.restore_inputs --archive /path/to/HANA_M1_Benchmark_Pack.zip
+# A folder holding the original files under any names, such as a Drive download
+python -m backend.evaluation.restore_inputs --source-dir /path/to/deal-files
+# The three public broker OMs (Daly City, Chicago, Corporate Place) from their URLs
+python -m backend.evaluation.restore_inputs --download-public
 ```
 
-Restoration validates source checksums against the versioned manifest.
+Every file is matched and checked by SHA-256 against `inputs/manifest.json`
+and written to the manifest's own path. A public OM the broker has since
+replaced fails its checksum and is not used, because the labels describe the
+snapshot. The command prints any documents still missing. A dev run only
+needs the dev documents.
 
 ## Dataset files
 
@@ -107,6 +149,16 @@ The importer validates the complete worksheet before replacing JSON files and
 updates the version in both cases and labels. Commit the reviewed metadata diff.
 Run evaluation without `--allow-draft` to enforce approved-label checks.
 
+## Add fields
+
+Add a row to `ground_truth/review.csv` with a field name the case doesn't
+have yet and fill the extra `description` column (and `abs_tolerance` if a
+numeric tolerance is needed). The importer adds the field to the case
+specification, labels, and evidence. To have the production extractor scored
+on it, use the `REPEDealProfile` field name, such as `noi`, `cap_rate`,
+`property_type`, `address`, or `sponsor_name`. Units follow the conventions
+above (`cap_rate` as a ratio, `0.079`). Other names stay benchmark-only.
+
 ## Replay saved predictions
 
 ```bash
@@ -121,8 +173,13 @@ to objects containing `fields`, `usage`, and `latency_seconds`.
 
 ## Include model cost
 
-Add `--pricing pricing.json` to evaluation or replay. Each key in the file is
-an exact reported model identifier. Its value contains numeric USD rates per
+Evaluation and replay price usage with `backend/evaluation/pricing.json`
+(list prices for the default Claude Sonnet 4.5 IDs and Gemini 2.5 Flash).
+Check them against the provider pricing pages before quoting a cost, and add
+any model you evaluate: `report.md` names models without a rate, and their
+cost is reported as unknown. Pass `--pricing other.json` to use another
+file, or `--no-pricing` to skip cost. Each key in the file is an exact
+reported model identifier. Its value contains numeric USD rates per
 million tokens:
 
 - `input_per_million`
