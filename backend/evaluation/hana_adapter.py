@@ -34,6 +34,20 @@ FIELD_MAP = {
     "ltv": ("ltv", "ratio", .01),
     "property_address": ("address", "text", 1),
 }
+# Benchmark fields named after a production field test that field exactly as
+# REPEDealProfile defines it, so adding domain-reviewed rows with these names
+# (import_review.py) grows the scored scope without new semantic aliases.
+PRODUCTION_FIELD_UNITS = {
+    "deal_name": "text", "property_name": "text", "property_type": "text", "address": "text",
+    "location": "text", "market": "text", "submarket": "text", "transaction_type": "text",
+    "sponsor_name": "text", "units": "count", "square_feet": "sqft", "year_built": "year",
+    "asking_price": "USD", "annual_revenue": "USD", "operating_expenses": "USD", "noi": "USD",
+    "loan_amount": "USD", "sponsor_equity": "USD", "loan_term_years": "years",
+    "occupancy_rate": "ratio", "cap_rate": "ratio", "interest_rate": "ratio", "ltv": "ratio",
+}
+PERCENT_FIELDS = {"occupancy_rate", "cap_rate", "interest_rate", "ltv"}
+for _name, _unit in PRODUCTION_FIELD_UNITS.items():
+    FIELD_MAP.setdefault(_name, (_name, _unit, .01 if _name in PERCENT_FIELDS else 1))
 
 
 def profile_fields(profile, case: dict, *, incomplete_scope: bool) -> dict:

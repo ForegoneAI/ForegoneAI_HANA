@@ -2,11 +2,19 @@
 
 Requires an explicit dataset version change. This command never approves rows
 automatically and never reads extraction predictions. Use --check for a dry run.
+
+Adding fields: a row for a field the case doesn't have yet is added when it
+fills the optional `description` column (and optionally `abs_tolerance`).
+Name new fields after the production REPEDealProfile field they test (e.g.
+`noi`, `property_type`) so hana_adapter can score them; other names are
+benchmark-only and stay outside the extractor's scope.
 """
 
 import argparse
 import csv
 import json
+import math
+import re
 import tempfile
 from pathlib import Path
 
@@ -22,13 +30,27 @@ def import_review(root: Path, csv_path: Path, new_version: str, *, check: bool =
     evidence = read_json(root / "ground_truth/evidence.json")
     expected = {(cid, name) for cid, fields in labels["cases"].items() for name in fields}
     seen = set()
+    specs = {case["case_id"]: case["requested_fields"] for case in config["cases"]}
+    added = set()
     with csv_path.open(newline="", encoding="utf-8-sig") as source:
         for row in csv.DictReader(source):
             key = (row["case_id"], row["field"])
-            if key not in expected or key in seen:
-                raise ValueError(f"Unknown or duplicate review row: {key}")
-            seen.add(key)
+            if key in seen or key in added:
+                raise ValueError(f"Duplicate review row: {key}")
             cid, name = key
+            if key in expected:
+                seen.add(key)
+            else:
+                description = (row.get("description") or "").strip()
+                if cid not in specs or not description or not re.fullmatch(r"[a-z][a-z0-9_]*", name):
+                    raise ValueError(f"Unknown review row {key}: new fields need a known case, a snake_case "
+                                     "field name, and a description")
+                tolerance = json.loads(row.get("abs_tolerance") or "0")
+                if type(tolerance) not in (int, float) or not math.isfinite(tolerance) or tolerance < 0:
+                    raise ValueError(f"Invalid abs_tolerance for {key}")
+                specs[cid][name] = {"unit": row["unit"], "description": description}
+                labels["cases"][cid][name] = {"abs_tolerance": tolerance}
+                added.add(key)
             gold = labels["cases"][cid][name]
             gold.update(status=row["status"], value=json.loads(row["expected_value"]), unit=row["unit"],
                         review_status=row["review_status"], reviewer=row["reviewer"].strip() or None,

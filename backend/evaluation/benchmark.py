@@ -25,6 +25,31 @@ from backend.evaluation.scoring import model_cost, ratio, score_case, summarize
 
 DEFAULT_ADAPTER = "backend.evaluation.hana_adapter:extract"
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# Published per-million-token list prices for the default models, used when
+# --pricing isn't given so one command reports approximate cost. Unpriced
+# models stay unknown (null), never free; see evaluation/README.md.
+DEFAULT_PRICING = Path(__file__).parent / "pricing.json"
+# Flat headline metrics for the fields the extractor's schema can express.
+SCOPE_METRICS = ("field_accuracy", "grounded_accuracy", "evidence_location_accuracy", "output_coverage")
+
+
+def unsupported_fields(pred: dict) -> set[str]:
+    """Fields the adapter declared it cannot express (e.g. scenario-specific
+    benchmark fields with no production schema equivalent). They stay in
+    every headline denominator; this only enables a separate scoped view."""
+    metadata = pred.get("metadata")
+    names = metadata.get("unsupported_schema_fields") if isinstance(metadata, dict) else None
+    return {n for n in names if isinstance(n, str)} if isinstance(names, list) else set()
+
+
+def scoped(rows: list[dict]) -> list[dict]:
+    return [r for r in rows if r["in_extractor_scope"]]
+
+
+def unpriced_models(predictions: dict, pricing: dict) -> list[str]:
+    models = {call.get("model") for pred in predictions.values() for call in (pred.get("usage") or [])
+              if isinstance(call, dict)}
+    return sorted(m for m in models if isinstance(m, str) and not isinstance(pricing.get(m), dict))
 
 
 def provenance() -> dict:
@@ -50,7 +75,8 @@ def provenance() -> dict:
 def validate_thresholds(rules: dict) -> None:
     allowed = set(summarize([])) - {"counts"}
     allowed |= {"macro_case_accuracy", "latency_mean_seconds", "latency_p95_seconds", "approx_model_cost_usd",
-                "known_partial_model_cost_usd", "cost_coverage", "latency_coverage", "case_error_rate", "unexpected_field_count"}
+                "known_partial_model_cost_usd", "cost_coverage", "latency_coverage", "case_error_rate", "unexpected_field_count",
+                "extractor_scope_share"} | {"in_scope_" + name for name in SCOPE_METRICS}
     if not isinstance(rules, dict):
         raise ValueError("Thresholds must be a metric-to-rule object")
     for name, rule in rules.items():
@@ -98,9 +124,13 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         # usage is a lower bound only (provider failures may omit token data).
         scored = {"fields": {}} if error else pred
         rows, extras = score_case(scored, dataset.labels[cid], dataset.evidence[cid])
+        unsupported = unsupported_fields(pred)
+        for row in rows:
+            row["in_extractor_scope"] = row["field"] not in unsupported
         all_rows.extend(rows)
         partial_cost = model_cost(pred, pricing or {})
-        results.append({"case_id": cid, "metrics": summarize(rows), "latency_seconds": latency,
+        results.append({"case_id": cid, "metrics": summarize(rows), "in_scope_metrics": summarize(scoped(rows)),
+                        "latency_seconds": latency,
                         "approx_model_cost_usd": partial_cost if not error else None,
                         "known_partial_model_cost_usd": partial_cost,
                         "error": error, "unexpected_fields": extras, "fields": rows,
@@ -120,29 +150,113 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         "case_error_rate": ratio(sum(r["error"] is not None for r in results), len(results)),
         "unexpected_field_count": sum(len(r["unexpected_fields"]) for r in results),
     })
+    # Scoped view: only fields the extractor can express. Headline metrics
+    # above keep every expected field; this separates "the extractor got it
+    # wrong" from "the production schema has no field for it".
+    in_scope = summarize(scoped(all_rows))
+    metrics["extractor_scope_share"] = ratio(len(scoped(all_rows)), len(all_rows))
+    metrics.update({"in_scope_" + name: in_scope[name] for name in SCOPE_METRICS})
     failures = [key for key, rule in (thresholds or {}).items()
                 if metrics.get(key) is None or ("min" in rule and metrics[key] < rule["min"])
                 or ("max" in rule and metrics[key] > rule["max"])]
-    return {"metrics": metrics, "threshold_failures": failures, "cases": results}, predictions
+    return {"metrics": metrics, "in_extractor_scope": in_scope, "threshold_failures": failures,
+            "cases": results}, predictions
+
+
+def compare(report: dict, baseline: dict) -> dict:
+    """Metric deltas and per-field flips against an earlier report.json, so a
+    rerun after a prompt/model change shows exactly what moved."""
+    warnings = []
+    for key in ("dataset_version", "split", "dataset_sha256"):
+        if baseline.get(key) != report.get(key):
+            warnings.append(f"{key} differs from the baseline; deltas may not be like-for-like.")
+    deltas = {}
+    for key, value in report["metrics"].items():
+        old = baseline.get("metrics", {}).get(key)
+        if type(value) in (int, float) and type(old) in (int, float):
+            deltas[key] = {"baseline": old, "current": value, "delta": value - old}
+        elif key != "counts":
+            deltas[key] = {"baseline": old, "current": value, "delta": None}
+
+    def outcomes(source: dict) -> dict:
+        return {(case.get("case_id"), row.get("field")): (row.get("value_correct"), row.get("evidence_correct"))
+                for case in source.get("cases", []) if isinstance(case, dict)
+                for row in case.get("fields", []) if isinstance(row, dict)}
+
+    before, after = outcomes(baseline), outcomes(report)
+    flips = [{"case_id": cid, "field": name, "baseline_value_correct": before[(cid, name)][0],
+              "value_correct": after[(cid, name)][0], "baseline_evidence_correct": before[(cid, name)][1],
+              "evidence_correct": after[(cid, name)][1]}
+             for cid, name in sorted(set(before) & set(after)) if before[(cid, name)] != after[(cid, name)]]
+    return {"baseline_run_id": baseline.get("run_id"), "baseline_model": baseline.get("requested_model"),
+            "warnings": warnings, "metric_deltas": deltas, "field_changes": flips}
+
+
+def _fmt(value) -> str:
+    if value is None:
+        return "N/A"
+    if isinstance(value, float):
+        return f"{value:.4f}" if abs(value) < 1 else f"{value:.3f}"
+    return str(value)
+
+
+def _cell(value) -> str:
+    text = json.dumps(value) if not isinstance(value, str) else value
+    return text.replace("|", "/").replace("\n", " ")
 
 
 def write_report(out: Path, report: dict, predictions: dict) -> None:
     out.mkdir(parents=True, exist_ok=True)
     for name, value in (("report.json", report), ("predictions.json", predictions)):
         (out / name).write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    model = report.get("requested_model") or (report["cases"][0]["extraction_metadata"].get("requested_model")
+                                              if report["cases"] and isinstance(report["cases"][0]["extraction_metadata"], dict) else None)
     lines = ["# Extraction evaluation", f"\nStatus: **{report['label_status']}** | Split: {report['split']}",
-             f"\nDataset: {report['dataset_version']} | Run: {report['run_id']}", "\n| Metric | Value |", "|---|---|"]
+             f"\nDataset: {report['dataset_version']} | Run: {report['run_id']} | Model: {model or 'N/A'}",
+             "\n| Metric | Value |", "|---|---|"]
     for key, value in report["metrics"].items():
         if key != "counts":
-            lines.append(f"| {key} | {value if value is not None else 'N/A'} |")
-    lines += ["\n## Cases", "| Case | Accuracy | Latency (s) | Model cost (USD) | Error |", "|---|---:|---:|---:|---|"]
+            lines.append(f"| {key} | {_fmt(value)} |")
+    scope = report["metrics"].get("extractor_scope_share")
+    lines.append(f"\n`in_scope_*` metrics cover only fields the extractor's schema can express "
+                 f"({_fmt(scope)} of expected fields). Headline metrics keep every expected field.")
+    if report.get("unpriced_models"):
+        lines.append(f"\nNo pricing for: {', '.join(report['unpriced_models'])}. Add rates with --pricing to report cost.")
+    lines += ["\n## Cases", "| Case | Accuracy | In-scope accuracy | Latency (s) | Model cost (USD) | Error |",
+              "|---|---:|---:|---:|---:|---|"]
     for case in report["cases"]:
-        error = (case["error"] or "").replace("|", "/").replace("\n", " ")
-        lines.append(f"| {case['case_id']} | {case['metrics']['field_accuracy']:.3f} | {case['latency_seconds']} | {case['approx_model_cost_usd']} | {error} |")
+        lines.append(f"| {case['case_id']} | {_fmt(case['metrics']['field_accuracy'])} | "
+                     f"{_fmt(case['in_scope_metrics']['field_accuracy'])} | {_fmt(case['latency_seconds'])} | "
+                     f"{_fmt(case['approx_model_cost_usd'])} | {_cell(case['error'] or '')} |")
+    comparison = report.get("comparison")
+    if comparison:
+        lines += [f"\n## Compared with run {comparison['baseline_run_id']} ({comparison['baseline_model'] or 'model N/A'})"]
+        lines += ["- " + w for w in comparison["warnings"]]
+        lines += ["\n| Metric | Baseline | Current | Change |", "|---|---:|---:|---:|"]
+        for key, row in comparison["metric_deltas"].items():
+            delta = row["delta"]
+            lines.append(f"| {key} | {_fmt(row['baseline'])} | {_fmt(row['current'])} | "
+                         f"{'N/A' if delta is None else ('+' if delta > 0 else '') + _fmt(delta)} |")
+        if comparison["field_changes"]:
+            lines += ["\n| Case | Field | Value correct (before → now) | Evidence correct (before → now) |", "|---|---|---|---|"]
+            for flip in comparison["field_changes"]:
+                lines.append(f"| {flip['case_id']} | {flip['field']} | {flip['baseline_value_correct']} → {flip['value_correct']} | "
+                             f"{flip['baseline_evidence_correct']} → {flip['evidence_correct']} |")
+        else:
+            lines.append("\nNo field-level outcome changed.")
+    lines += ["\n## Fields", "Expected values are answer keys: keep holdout reports out of prompt tuning."]
     for case in report["cases"]:
-        metadata = case["extraction_metadata"]
-        if isinstance(metadata, dict) and metadata.get("unsupported_schema_fields"):
-            lines.append(f"\nUnmapped fields ({case['case_id']}): {metadata['unsupported_schema_fields']}\n")
+        lines += [f"\n### {case['case_id']}", "| Field | Expected | Predicted | Value | Evidence | In scope |",
+                  "|---|---|---|:-:|:-:|:-:|"]
+        for row in case["fields"]:
+            exp, pred = row["expected"], row["prediction"]
+            expected = exp["status"] if exp["status"] == "missing" else (
+                exp.get("candidates") if exp["status"] == "conflict" else exp["value"])
+            predicted = "(not returned)" if not isinstance(pred, dict) else (
+                pred.get("status") if pred.get("value") is None and not pred.get("candidates")
+                else pred.get("candidates") or pred.get("value"))
+            lines.append(f"| {row['field']} | {_cell(expected)} | {_cell(predicted)} | {'✓' if row['value_correct'] else '✗'} | "
+                         f"{'✓' if row['evidence_correct'] else '✗'} | {'yes' if row['in_extractor_scope'] else 'no'} |")
     lines += ["\n## Interpretation"] + ["- " + item for item in report["limitations"]]
     lines += ["\nThreshold failures: " + (", ".join(report["threshold_failures"]) or "none / no thresholds supplied")]
     (out / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -157,7 +271,10 @@ def main(argv=None) -> int:
     mode.add_argument("--predictions", type=Path, help="Replay a saved predictions.json without model calls")
     parser.add_argument("--provider", choices=["anthropic", "openrouter"], help="Extraction provider for the production adapter")
     parser.add_argument("--model", help="Model ID for the production adapter; use author/model for OpenRouter")
-    parser.add_argument("--pricing", type=Path)
+    pricing_group = parser.add_mutually_exclusive_group()
+    pricing_group.add_argument("--pricing", type=Path, help=f"Model-to-rates JSON (default: {DEFAULT_PRICING.name})")
+    pricing_group.add_argument("--no-pricing", action="store_true", help="Report cost as unknown")
+    parser.add_argument("--compare", type=Path, help="Earlier report.json to show metric and field changes against")
     parser.add_argument("--thresholds", type=Path)
     parser.add_argument("--allow-draft", action="store_true")
     parser.add_argument("--unlock-holdout", action="store_true")
@@ -175,9 +292,13 @@ def main(argv=None) -> int:
             parser.error("Labels await domain approval; use --allow-draft for provisional reports.")
         thresholds = read_json(args.thresholds) if args.thresholds else {}
         validate_thresholds(thresholds)
-        pricing = read_json(args.pricing) if args.pricing else {}
+        pricing_path = None if args.no_pricing else (args.pricing or (DEFAULT_PRICING if DEFAULT_PRICING.is_file() else None))
+        pricing = read_json(pricing_path) if pricing_path else {}
         if not isinstance(pricing, dict):
             raise ValueError("Pricing must be a model-to-rates object")
+        baseline = read_json(args.compare) if args.compare else None
+        if baseline is not None and (not isinstance(baseline, dict) or not isinstance(baseline.get("metrics"), dict)):
+            raise ValueError("--compare needs a report.json written by this command")
         cached = read_json(args.predictions) if args.predictions else {}
         if not isinstance(cached, dict):
             raise ValueError("Saved predictions must map case IDs to predictions")
@@ -218,6 +339,8 @@ def main(argv=None) -> int:
         "requested_provider": args.provider, "requested_model": args.model,
         "created_at_utc": datetime.now(timezone.utc).isoformat(), "provenance": context,
         "dataset_sha256": hashes, "pricing": pricing, "thresholds": thresholds,
+        "pricing_source": str(pricing_path) if pricing_path else None,
+        "unpriced_models": unpriced_models(predictions, pricing),
         "predictions_source_sha256": sha256(args.predictions) if args.predictions else None,
         "limitations": [
             "Draft labels are provisional until the domain team approves them; holdout novelty needs team confirmation.",
@@ -227,8 +350,11 @@ def main(argv=None) -> int:
             "Latency includes parsing/extraction; replay uses saved latency. p95 is unstable for small sets.",
             "Cost uses reported model tokens and supplied rates; unknown cost is null. Failed-run cost is partial.",
             "Reports contain answer keys; keep holdout reports outside prompt tuning and retrieval indexes.",
+            "in_scope_* metrics exclude fields the adapter cannot express; schema gaps are not extraction errors.",
         ],
     })
+    if baseline is not None:
+        report["comparison"] = compare(report, baseline)
     out = args.out or Path(__file__).parent / "reports" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + report["run_id"][:8])
     write_report(out, report, predictions)
     print(json.dumps({"status": report["label_status"], "metrics": report["metrics"], "report": str(out / "report.md")}, indent=2))

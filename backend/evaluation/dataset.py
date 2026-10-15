@@ -72,7 +72,8 @@ class Dataset:
             doc = self.documents[did]
             path = self.root / doc["path"]
             if not path.is_file():
-                raise ValueError(f"Missing source {did}: restore inputs from HANA_M1_Benchmark_Pack.zip to {self.root}")
+                raise ValueError(f"Missing source {did}: restore inputs with python -m backend.evaluation.restore_inputs "
+                                 "(--archive, --source-dir or --download-public; see evaluation/README.md)")
             if sha256(path) != doc["sha256"]:
                 raise ValueError(f"Source checksum mismatch: {did}")
 
