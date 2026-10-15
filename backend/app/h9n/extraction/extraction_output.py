@@ -915,9 +915,8 @@ def _cited_value(field_name: str, entry: ExtractedEvidence, page: dict[str, Any]
 
 def _unique(field_name: str, value: Any, passages: list[ConflictingValue]) -> list[ConflictingValue]:
     """`passages` without repeats, capped at MAX_CONFLICT_PASSAGES. Passages
-    giving a different value than `value` are kept first, so the cap only ever
-    drops passages that agree with the extracted value; document order is
-    kept."""
+    giving a different value than `value` are kept first, so the cap drops
+    agreeing passages before any disagreeing one; document order is kept."""
     unique: list[ConflictingValue] = []
     seen: set[tuple[Any, ...]] = set()
     for passage in passages:
@@ -930,7 +929,8 @@ def _unique(field_name: str, value: Any, passages: list[ConflictingValue]) -> li
             seen.add(key)
             unique.append(passage)
     differing = [i for i, passage in enumerate(unique) if not _same_value(field_name, passage.value, value)]
-    agreeing = [i for i in range(len(unique)) if i not in set(differing)]
+    differing_set = set(differing)
+    agreeing = [i for i in range(len(unique)) if i not in differing_set]
     keep = sorted(differing[:MAX_CONFLICT_PASSAGES] + agreeing[: max(0, MAX_CONFLICT_PASSAGES - len(differing))])
     return [unique[i] for i in keep]
 

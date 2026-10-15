@@ -224,13 +224,18 @@ Some non-obvious behavior:
     figure ("NOI: $1,500,000"), it is often another section's figure - in-place vs pro forma, a
     senior vs a mezzanine loan - not a contradiction. The value is **kept**; a `possible_conflicts`
     entry holds every passage, an `uncertain_information` note is added, and the field reads
-    `uncertain` until a reviewer confirms it.
+    `uncertain` while that note is there. A reviewer who has checked the value dismisses the flag by
+    removing the note - `field_status.dismiss_possible_conflict(profile, field)` returns that change
+    for the usual `PATCH`. It only touches `uncertain_information`, so it is never recorded as a
+    corrected value, and the review form and `field_statuses` always agree. Correcting the field's
+    value also settles it.
 
   To keep the label check quiet, a generic label ("Total:", "Price:"), a longer label that merely
   contains this one ("Pro Forma Asking Price"), a line with several figures after the label (a row
   of years or a range) and a bare number followed by a word ("4 offers") are ignored, and every
   passage kept must pass the same evidence check as a citation. At most 10 passages are kept per
-  field, always including every disagreeing one. The document is split and normalized once, and
+  field (plus the value's own), disagreeing ones first, so agreeing passages are dropped before any
+  disagreeing one. The document is split and normalized once, and
   only lines containing the label are parsed for numbers (about 0.15 s for a 300-page package).
   Text fields are only treated as conflicting when Claude flags them.
 - **Saved per run.** `record_extraction_run` also writes one `extraction_field_statuses` row per

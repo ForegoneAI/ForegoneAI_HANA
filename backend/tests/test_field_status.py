@@ -20,6 +20,7 @@ from backend.app.h9n.schemas.base_deal import (
 )
 from backend.app.h9n.schemas.field_status import (
     BOOKKEEPING_FIELDS,
+    dismiss_possible_conflict,
     assess_field,
     note_names_field,
     note_text,
@@ -265,10 +266,13 @@ def test_a_possible_conflict_flags_a_stored_value_as_uncertain():
     assert report.conflicting_values == passages
     assert [e.page_number for e in report.evidence] == [1, 7]
 
-    # A reviewer dismissing it settles it, even though its note remains...
-    dismissed = deal.model_copy(update={"possible_conflicts": []})
-    assert _status(dismissed, "noi").status == "supported"
-    # ...and so does a reviewer confirming the value.
+    # Removing only the entry leaves the note the review form shows, so the
+    # status keeps agreeing with the form.
+    entry_only_removed = deal.model_copy(update={"possible_conflicts": []})
+    assert _status(entry_only_removed, "noi").status == "uncertain"
+    assert [r.code for r in _status(entry_only_removed, "noi").reasons] == ["same_label_different_value"]
+
+    # Correcting the value also settles it.
     deal.corrected_fields.append("noi")
     assert _status(deal, "noi").needs_review is False
 
@@ -443,3 +447,76 @@ def test_bookkeeping_fields_are_defined_once_and_never_extracted():
     assert extraction_output.NON_EXTRACTABLE_FIELDS == BOOKKEEPING_FIELDS - extraction_output._META_FIELDS
     assert "possible_conflicts" in extraction_output.NON_EXTRACTABLE_FIELDS
     assert BOOKKEEPING_FIELDS <= set(REPEDealProfile.model_fields)
+
+
+# --- Dismissing a possible conflict ----------------------------------------------------
+
+
+def _possibly_conflicting_noi():
+    from backend.app.h9n.extraction.extraction_output import REPEExtractionOutput, enforce_integrity
+
+    pages = [
+        {"file_name": "deal.pdf", "page_number": 1, "text": "In-Place\nNOI: $1,200,000"},
+        {"file_name": "deal.pdf", "page_number": 7, "text": "Pro Forma\nNOI: $1,500,000"},
+    ]
+    output = full_output(
+        noi=1_200_000,
+        evidence=[evidence("noi", 1_200_000, "NOI: $1,200,000", source_document="deal.pdf")],
+        field_flags=[{"field_name": "cap_rate", "flag": "uncertain", "note": "unrelated note"}],
+    )
+    return enforce_integrity(REPEExtractionOutput.model_validate(output), pages)
+
+
+def test_dismissing_a_possible_conflict_only_removes_its_note():
+    deal = _possibly_conflicting_noi()
+    assert _status(deal, "noi").status == "uncertain"
+
+    changes = dismiss_possible_conflict(deal, "noi")
+
+    # Only a bookkeeping list changes, so applying it through either review
+    # path never records "noi" or the flag as a corrected value.
+    assert set(changes) == {"uncertain_information"}
+    assert changes["uncertain_information"] == ["cap_rate: unrelated note"]
+
+    dismissed = deal.model_copy(update=changes)
+    report = _status(dismissed, "noi")
+    assert (report.status, report.needs_review, report.reviewer_corrected) == ("supported", False, False)
+    assert report.conflicting_values == []
+    assert dismissed.corrected_fields == []
+    # The record of what was found is kept.
+    assert dismissed.possible_conflicts == deal.possible_conflicts
+
+
+def test_dismissing_works_through_the_correction_path_too():
+    # The same change applied the way a PATCH applies it (validated setattr).
+    deal = _possibly_conflicting_noi()
+
+    for field_name, value in dismiss_possible_conflict(deal, "noi").items():
+        setattr(deal, field_name, value)
+
+    assert _status(deal, "noi").status == "supported"
+
+
+def test_there_is_nothing_to_dismiss_without_an_open_possible_conflict():
+    deal = _possibly_conflicting_noi()
+    dismissed = deal.model_copy(update=dismiss_possible_conflict(deal, "noi"))
+
+    with pytest.raises(ValueError, match="no open possible conflict"):
+        dismiss_possible_conflict(dismissed, "noi")
+    with pytest.raises(ValueError):
+        dismiss_possible_conflict(deal, "cap_rate")  # an ordinary uncertain note isn't one
+
+
+def test_a_newer_proposal_does_not_bring_back_an_earlier_possible_conflict():
+    deal = _possibly_conflicting_noi()
+    deal.noi = 1_500_000
+    deal.corrected_fields.append("noi")
+    deal.withheld_values = [
+        WithheldValue(field_name="noi", proposed_value=1_400_000, reason="snippet_not_on_page", detail="Not found.")
+    ]
+
+    report = _status(deal, "noi")
+
+    assert report.needs_review is True
+    assert report.conflicting_values == []
+    assert [r.code for r in report.reasons] == ["unverified_value", "reviewer_corrected"]

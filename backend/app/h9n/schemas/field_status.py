@@ -76,7 +76,14 @@ FieldStatusReasonCode = Literal[
 
 # Every field not in base_deal.BOOKKEEPING_FIELDS is a deal value and gets a
 # status. Re-exported here for callers that read statuses.
-__all__ = ["BOOKKEEPING_FIELDS", "FieldStatus", "FieldStatusReport", "assess_field", "assess_fields"]
+__all__ = [
+    "BOOKKEEPING_FIELDS",
+    "FieldStatus",
+    "FieldStatusReport",
+    "assess_field",
+    "assess_fields",
+    "dismiss_possible_conflict",
+]
 
 _CONFLICT_REASONS = {"model_conflicting", "conflicting_evidence"}
 
@@ -165,9 +172,50 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
     withheld: Optional[WithheldValue] = next(
         (entry for entry in profile.withheld_values if entry.field_name == field_name), None
     )
-    possible: Optional[PossibleConflict] = next(
-        (entry for entry in profile.possible_conflicts if entry.field_name == field_name), None
+    corrected = field_name in profile.corrected_fields
+
+    def notes(source: list[str]) -> list[str]:
+        return [note_text(note, field_name) for note in source if note_names_field(note, field_name)]
+
+    if corrected and withheld is None:
+        # The reviewer's value (or blank) stands, whatever the extractor said.
+        return FieldStatusReport(
+            status="supported" if has_value else "missing",
+            needs_review=False,
+            reviewer_corrected=True,
+            reasons=[
+                FieldStatusReason(
+                    code="reviewer_corrected",
+                    message="Set by a reviewer." if has_value else "Cleared by a reviewer.",
+                )
+            ],
+            evidence=_dedupe(stored),
+        )
+
+    if corrected:
+        # A newer proposal is waiting (e.g. re-derived after reviewer
+        # feedback): the reviewer has to accept or dismiss it. Extractor notes
+        # and possible conflicts from before the correction no longer apply.
+        conflict_notes: list[str] = []
+        uncertain_notes: list[str] = []
+        missing_notes: list[str] = []
+    else:
+        conflict_notes = notes(profile.conflicting_information)
+        uncertain_notes = notes(profile.uncertain_information)
+        missing_notes = notes(profile.missing_information)
+
+    # A possible conflict is open while its note is in uncertain_information:
+    # the note is what the review form shows, and removing it is how a
+    # reviewer dismisses the flag (see dismiss_possible_conflict). The entry
+    # itself stays as the record of what was found.
+    possible_notes = [note for note in uncertain_notes if note.startswith(POSSIBLE_CONFLICT_PREFIX)]
+    uncertain_notes = [note for note in uncertain_notes if not note.startswith(POSSIBLE_CONFLICT_PREFIX)]
+    possible: Optional[PossibleConflict] = (
+        next((entry for entry in profile.possible_conflicts if entry.field_name == field_name), None)
+        if possible_notes
+        else None
     )
+
     conflicting_values = (list(withheld.conflicting_values) if withheld else []) or (
         list(possible.conflicting_values) if possible else []
     )
@@ -176,12 +224,8 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
         + ([withheld.evidence] if withheld and withheld.evidence else [])
         + [candidate.evidence for candidate in conflicting_values]
     )
-    corrected = field_name in profile.corrected_fields
 
-    def notes(source: list[str]) -> list[str]:
-        return [note_text(note, field_name) for note in source if note_names_field(note, field_name)]
-
-    def report(status: FieldStatus, reasons: list[FieldStatusReason], **extra: Any) -> FieldStatusReport:
+    def report(status: FieldStatus, reasons: list[FieldStatusReason]) -> FieldStatusReport:
         return FieldStatusReport(
             status=status,
             needs_review=status != "supported",
@@ -190,35 +234,7 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
             proposed_value=withheld.proposed_value if withheld else None,
             conflicting_values=conflicting_values,
             evidence=evidence,
-            **extra,
         )
-
-    if corrected:
-        if withheld is None:
-            # The reviewer's value (or blank) stands, whatever the extractor said.
-            return FieldStatusReport(
-                status="supported" if has_value else "missing",
-                needs_review=False,
-                reviewer_corrected=True,
-                reasons=[
-                    FieldStatusReason(
-                        code="reviewer_corrected",
-                        message="Set by a reviewer." if has_value else "Cleared by a reviewer.",
-                    )
-                ],
-                evidence=evidence,
-            )
-        # A newer proposal is waiting (e.g. re-derived after reviewer
-        # feedback): the reviewer has to accept or dismiss it. Extractor notes
-        # from before the correction no longer apply.
-        conflict_notes: list[str] = []
-        uncertain_notes: list[str] = []
-        missing_notes: list[str] = []
-        possible = None
-    else:
-        conflict_notes = notes(profile.conflicting_information)
-        uncertain_notes = notes(profile.uncertain_information)
-        missing_notes = notes(profile.missing_information)
 
     if (withheld and withheld.reason in _CONFLICT_REASONS) or conflict_notes:
         reasons = []
@@ -233,16 +249,11 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
         ]
         return report("conflicting", reasons)
 
-    reasons = []
-    if possible is not None:
-        reasons.append(FieldStatusReason(code="same_label_different_value", message=possible.detail))
-    # A possible-conflict note only mirrors its PossibleConflict entry, which
-    # is what counts: once a reviewer dismisses the entry, the note is moot.
-    reasons += [
-        FieldStatusReason(code="model_flagged_uncertain", message=note)
-        for note in uncertain_notes
-        if not note.startswith(POSSIBLE_CONFLICT_PREFIX)
+    reasons = [
+        FieldStatusReason(code="same_label_different_value", message=possible.detail if possible else note)
+        for note in possible_notes[:1]
     ]
+    reasons += [FieldStatusReason(code="model_flagged_uncertain", message=note) for note in uncertain_notes]
     if withheld:
         if withheld.reason == "model_uncertain":
             if not any(reason.code == "model_flagged_uncertain" for reason in reasons):
@@ -289,6 +300,29 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
         "supported",
         [FieldStatusReason(code="verified_citation", message="The cited passage contains this value.")],
     )
+
+
+def dismiss_possible_conflict(profile: "BaseDeal", field_name: str) -> dict[str, Any]:
+    """The change that dismisses `field_name`'s possible conflict - a reviewer
+    has checked the stored value and it is the right figure - as a dict to
+    apply with the usual correction path (`PATCH /deals/{id}`).
+
+    It only removes the flag's note from `uncertain_information`, a
+    bookkeeping list in every review path, so the dismissal is never recorded
+    as a corrected deal value, and the review form (which reads the notes)
+    and `field_statuses` agree straight away. The PossibleConflict entry is
+    kept as the record of the passages that were found.
+
+    Raises ValueError if the field has no open possible conflict.
+    """
+    remaining = [
+        note
+        for note in profile.uncertain_information
+        if not (note_names_field(note, field_name) and note_text(note, field_name).startswith(POSSIBLE_CONFLICT_PREFIX))
+    ]
+    if len(remaining) == len(profile.uncertain_information):
+        raise ValueError(f"{field_name!r} has no open possible conflict to dismiss.")
+    return {"uncertain_information": remaining}
 
 
 def assess_fields(profile: "BaseDeal") -> dict[str, FieldStatusReport]:
