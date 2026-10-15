@@ -28,21 +28,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # --pricing isn't given so one command reports approximate cost. Unpriced
 # models stay unknown (null), never free; see evaluation/README.md.
 DEFAULT_PRICING = Path(__file__).parent / "pricing.json"
-# Flat headline metrics for the fields the extractor's schema can express.
-SCOPE_METRICS = ("field_accuracy", "grounded_accuracy", "evidence_location_accuracy", "output_coverage")
+# Reference-field metrics repeated in the flat metrics table.
+REFERENCE_METRICS = ("field_accuracy", "grounded_accuracy", "output_coverage")
 
 
 def unsupported_fields(pred: dict) -> set[str]:
-    """Fields the adapter declared it cannot express (e.g. scenario-specific
-    benchmark fields with no production schema equivalent). They stay in
-    every headline denominator; this only enables a separate scoped view."""
+    """Fields the adapter declared it cannot express. A production-scope
+    field in this set is a mapping gap (reported), not a model error."""
     metadata = pred.get("metadata")
     names = metadata.get("unsupported_schema_fields") if isinstance(metadata, dict) else None
     return {n for n in names if isinstance(n, str)} if isinstance(names, list) else set()
 
 
-def scoped(rows: list[dict]) -> list[dict]:
-    return [r for r in rows if r["in_extractor_scope"]]
+def production(rows: list[dict]) -> list[dict]:
+    return [r for r in rows if r["scope"] == "production"]
+
+
+def reference(rows: list[dict]) -> list[dict]:
+    return [r for r in rows if r["scope"] == "reference"]
 
 
 def unpriced_models(predictions: dict, pricing: dict) -> list[str]:
@@ -96,7 +99,7 @@ def validate_thresholds(rules: dict) -> None:
     allowed = set(summarize([])) - {"counts"}
     allowed |= {"macro_case_accuracy", "latency_mean_seconds", "latency_p95_seconds", "approx_model_cost_usd",
                 "known_partial_model_cost_usd", "cost_coverage", "latency_coverage", "case_error_rate", "unexpected_field_count",
-                "extractor_scope_share"} | {"in_scope_" + name for name in SCOPE_METRICS}
+                "production_field_share", "mapping_gap_count"} | {"reference_" + name for name in REFERENCE_METRICS}
     if not isinstance(rules, dict):
         raise ValueError("Thresholds must be a metric-to-rule object")
     for name, rule in rules.items():
@@ -153,10 +156,12 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         rows, extras = score_case(scored, dataset.labels[cid], dataset.evidence[cid])
         unsupported = unsupported_fields(pred)
         for row in rows:
-            row["in_extractor_scope"] = row["field"] not in unsupported
+            row["scope"] = dataset.scope(cid, row["field"])
+        gaps = sorted(r["field"] for r in production(rows) if r["field"] in unsupported)
         all_rows.extend(rows)
         partial_cost = model_cost(pred, pricing or {})
-        results.append({"case_id": cid, "metrics": summarize(rows), "in_scope_metrics": summarize(scoped(rows)),
+        results.append({"case_id": cid, "metrics": summarize(production(rows)),
+                        "reference_metrics": summarize(reference(rows)), "mapping_gaps": gaps,
                         "latency_seconds": latency,
                         "approx_model_cost_usd": partial_cost if not error else None,
                         "known_partial_model_cost_usd": partial_cost,
@@ -165,12 +170,16 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         predictions[cid] = pred
         if on_prediction:
             on_prediction(predictions)
-    metrics = summarize(all_rows)
+    # Headline metrics count only production fields: what H9N's extractor is
+    # meant to produce. Reference fields (labelled facts with no profile
+    # field) are reported separately and never drag the score down.
+    metrics = summarize(production(all_rows))
     latencies = [r["latency_seconds"] for r in results if r["latency_seconds"] is not None]
     costs = [r["approx_model_cost_usd"] for r in results if r["approx_model_cost_usd"] is not None]
     partial = [r["known_partial_model_cost_usd"] for r in results if r["known_partial_model_cost_usd"] is not None]
     metrics.update({
-        "macro_case_accuracy": statistics.mean(r["metrics"]["field_accuracy"] for r in results),
+        "macro_case_accuracy": statistics.mean(scores) if (scores := [
+            r["metrics"]["field_accuracy"] for r in results if r["metrics"]["field_accuracy"] is not None]) else None,
         "latency_mean_seconds": statistics.mean(latencies) if latencies else None,
         "latency_p95_seconds": sorted(latencies)[math.ceil(.95 * len(latencies)) - 1] if latencies else None,
         "latency_coverage": ratio(len(latencies), len(results)),
@@ -179,16 +188,14 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         "case_error_rate": ratio(sum(r["error"] is not None for r in results), len(results)),
         "unexpected_field_count": sum(len(r["unexpected_fields"]) for r in results),
     })
-    # Scoped view: only fields the extractor can express. Headline metrics
-    # above keep every expected field; this separates "the extractor got it
-    # wrong" from "the production schema has no field for it".
-    in_scope = summarize(scoped(all_rows))
-    metrics["extractor_scope_share"] = ratio(len(scoped(all_rows)), len(all_rows))
-    metrics.update({"in_scope_" + name: in_scope[name] for name in SCOPE_METRICS})
+    reference_summary = summarize(reference(all_rows))
+    metrics["production_field_share"] = ratio(len(production(all_rows)), len(all_rows))
+    metrics["mapping_gap_count"] = sum(len(r["mapping_gaps"]) for r in results)
+    metrics.update({"reference_" + name: reference_summary[name] for name in REFERENCE_METRICS})
     failures = [key for key, rule in (thresholds or {}).items()
                 if metrics.get(key) is None or ("min" in rule and metrics[key] < rule["min"])
                 or ("max" in rule and metrics[key] > rule["max"])]
-    return {"metrics": metrics, "in_extractor_scope": in_scope, "threshold_failures": failures,
+    return {"metrics": metrics, "reference_fields": reference_summary, "threshold_failures": failures,
             "cases": results}, predictions
 
 
@@ -246,16 +253,19 @@ def write_report(out: Path, report: dict, predictions: dict) -> None:
     for key, value in report["metrics"].items():
         if key != "counts":
             lines.append(f"| {key} | {_fmt(value)} |")
-    scope = report["metrics"].get("extractor_scope_share")
-    lines.append(f"\n`in_scope_*` metrics cover only fields the extractor's schema can express "
-                 f"({_fmt(scope)} of expected fields). Headline metrics keep every expected field.")
+    counts = report["metrics"].get("counts", {})
+    lines.append(f"\nScores count the {counts.get('fields', 0)} production fields (named after REPEDealProfile fields). "
+                 f"`reference_*` covers labelled facts the extractor has no field for; they never lower the score.")
+    gaps = [f"{c['case_id']}.{f}" for c in report["cases"] for f in c.get("mapping_gaps", [])]
+    if gaps:
+        lines.append(f"\n**Mapping gaps** (production fields the adapter didn't map; scored as wrong): {', '.join(gaps)}")
     if report.get("unpriced_models"):
         lines.append(f"\nNo pricing for: {', '.join(report['unpriced_models'])}. Add rates with --pricing to report cost.")
-    lines += ["\n## Cases", "| Case | Accuracy | In-scope accuracy | Latency (s) | Model cost (USD) | Error |",
-              "|---|---:|---:|---:|---:|---|"]
+    lines += ["\n## Cases", "| Case | Production fields | Accuracy | Reference fields | Latency (s) | Model cost (USD) | Error |",
+              "|---|---:|---:|---:|---:|---:|---|"]
     for case in report["cases"]:
-        lines.append(f"| {case['case_id']} | {_fmt(case['metrics']['field_accuracy'])} | "
-                     f"{_fmt(case['in_scope_metrics']['field_accuracy'])} | {_fmt(case['latency_seconds'])} | "
+        lines.append(f"| {case['case_id']} | {case['metrics']['counts']['fields']} | {_fmt(case['metrics']['field_accuracy'])} | "
+                     f"{case['reference_metrics']['counts']['fields']} | {_fmt(case['latency_seconds'])} | "
                      f"{_fmt(case['approx_model_cost_usd'])} | {_cell(case['error'] or '')} |")
     comparison = report.get("comparison")
     if comparison:
@@ -275,7 +285,7 @@ def write_report(out: Path, report: dict, predictions: dict) -> None:
             lines.append("\nNo field-level outcome changed.")
     lines += ["\n## Fields", "Expected values are answer keys: keep holdout reports out of prompt tuning."]
     for case in report["cases"]:
-        lines += [f"\n### {case['case_id']}", "| Field | Expected | Predicted | Value | Evidence | In scope |",
+        lines += [f"\n### {case['case_id']}", "| Field | Expected | Predicted | Value | Evidence | Scope |",
                   "|---|---|---|:-:|:-:|:-:|"]
         for row in case["fields"]:
             exp, pred = row["expected"], row["prediction"]
@@ -285,7 +295,7 @@ def write_report(out: Path, report: dict, predictions: dict) -> None:
                 pred.get("status") if pred.get("value") is None and not pred.get("candidates")
                 else pred.get("candidates") or pred.get("value"))
             lines.append(f"| {row['field']} | {_cell(expected)} | {_cell(predicted)} | {'✓' if row['value_correct'] else '✗'} | "
-                         f"{'✓' if row['evidence_correct'] else '✗'} | {'yes' if row['in_extractor_scope'] else 'no'} |")
+                         f"{'✓' if row['evidence_correct'] else '✗'} | {row['scope']} |")
     lines += ["\n## Interpretation"] + ["- " + item for item in report["limitations"]]
     lines += ["\nThreshold failures: " + (", ".join(report["threshold_failures"]) or "none / no thresholds supplied")]
     (out / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -397,7 +407,8 @@ def main(argv=None) -> int:
             "Latency includes parsing/extraction; replay uses saved latency. p95 is unstable for small sets.",
             "Cost uses reported model tokens and supplied rates; unknown cost is null. Failed-run cost is partial.",
             "Reports contain answer keys; keep holdout reports outside prompt tuning and retrieval indexes.",
-            "in_scope_* metrics exclude fields the adapter cannot express; schema gaps are not extraction errors.",
+            "Headline metrics cover production fields only; reference_* fields are labelled facts H9N has no field for.",
+            "Few production fields are labelled until the domain team fills the to_label rows in review.csv.",
         ],
     })
     if baseline is not None:

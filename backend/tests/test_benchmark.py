@@ -34,13 +34,13 @@ def dataset_root(tmp_path):
     source = tmp_path / "inputs/example.pdf"
     source.write_bytes(b"source snapshot for checksum testing")
     fields = {"asking_price": {"unit": "USD", "description": "Subject asking price"},
-              "lp_return": {"unit": "ratio", "description": "Explicit LP return, if stated"}}
+              "cap_rate": {"unit": "ratio", "description": "Current cap rate, if stated"}}
     cases = [{"case_id": "example", "family_id": "example", "split": "dev", "kind": "deal_package",
               "documents": ["example_doc"], "requested_fields": fields}]
     gold = {
         "asking_price": {"status": "present", "value": 100, "unit": "USD", "abs_tolerance": 0,
                          "review_status": "pending_domain_review", "reviewer": None, "reviewed_at": None},
-        "lp_return": {"status": "missing", "value": None, "unit": "ratio", "abs_tolerance": 0,
+        "cap_rate": {"status": "missing", "value": None, "unit": "ratio", "abs_tolerance": 0,
                       "review_status": "pending_domain_review", "reviewer": None, "reviewed_at": None},
     }
     files = {
@@ -48,7 +48,7 @@ def dataset_root(tmp_path):
         "inputs/manifest.json": [{"document_id": "example_doc", "path": "inputs/example.pdf", "sha256": sha256(source)}],
         "ground_truth/labels.json": {"dataset_version": "draft", "cases": {"example": gold}},
         "ground_truth/evidence.json": {"example": {
-            "asking_price": {"locations": [{"document_id": "example_doc", "page": 3}]}, "lp_return": {"locations": []}}},
+            "asking_price": {"locations": [{"document_id": "example_doc", "page": 3}]}, "cap_rate": {"locations": []}}},
     }
     for name, payload in files.items():
         (tmp_path / name).write_text(json.dumps(payload))
@@ -58,7 +58,7 @@ def dataset_root(tmp_path):
 def predictions():
     return {"example": {"fields": {
         "asking_price": {"status": "present", "value": 100, "unit": "USD", "evidence": [{"document_id": "example_doc", "page": 3}]},
-        "lp_return": {"status": "missing", "value": None, "unit": "ratio", "evidence": []},
+        "cap_rate": {"status": "missing", "value": None, "unit": "ratio", "evidence": []},
     }, "latency_seconds": 2.5, "execution_kind": "local_no_model", "usage": []}}
 
 
@@ -242,11 +242,13 @@ def test_withheld_and_incomplete_scope_are_never_missing():
 
 
 def test_percent_normalization_without_scenario_aliases():
-    profile = REPEDealProfile(occupancy_rate=94, noi=100)
-    case = {"documents": [], "requested_fields": {"occupancy": {"unit": "ratio"}, "current_noi": {"unit": "USD"}}}
+    profile = REPEDealProfile(occupancy_rate=94, noi=100, square_feet=5000)
+    case = {"documents": [], "requested_fields": {"occupancy_rate": {"unit": "ratio"}, "current_noi": {"unit": "USD"},
+                                                   "occupancy": {"unit": "ratio"}, "rentable_area": {"unit": "sqft"}}}
     fields = hana_adapter.profile_fields(profile, case, incomplete_scope=False)
-    assert fields["occupancy"]["value"] == pytest.approx(.94)
-    assert "current_noi" not in fields
+    assert fields["occupancy_rate"]["value"] == pytest.approx(.94)
+    # No aliases: only the profile's own field names are mapped.
+    assert not {"current_noi", "occupancy", "rentable_area"} & set(fields)
 
 
 def test_workbook_only_case_is_controlled_error_without_calling_model():
@@ -355,21 +357,45 @@ def test_cli_passes_model_and_provider_to_production_adapter(dataset_root, monke
     assert calls == [{"provider": "openrouter", "model": "google/test-model"}]
 
 
-def test_scoped_metrics_separate_schema_gaps_from_extraction_errors(dataset_root):
+def test_reference_fields_are_reported_but_never_lower_the_score(dataset_root):
+    edit(dataset_root, "inputs/cases.json", lambda c: c["cases"][0]["requested_fields"].update(
+        lp_return={"unit": "ratio", "description": "LP preferred return; H9N has no field for it"}))
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"]["example"].update(lp_return={
+        "status": "present", "value": .08, "unit": "ratio", "abs_tolerance": 0,
+        "review_status": "pending_domain_review", "reviewer": None, "reviewed_at": None}))
+    edit(dataset_root, "ground_truth/evidence.json", lambda e: e["example"].update(
+        lp_return={"locations": [{"document_id": "example_doc", "page": 5}]}))
     dataset = load_dataset(dataset_root)
+    assert dataset.scope("example", "lp_return") == "reference"
     pred = predictions()["example"]
-    del pred["fields"]["lp_return"]
     pred["metadata"] = {"unsupported_schema_fields": ["lp_return"]}
     report, _ = run(dataset, dataset.cases, cached={"example": pred})
     metrics = report["metrics"]
-    # The unexpressible field still counts against the headline metric...
-    assert metrics["field_accuracy"] == .5
-    # ...but the scoped view shows the extractor got everything it could.
-    assert metrics["in_scope_field_accuracy"] == 1
-    assert metrics["extractor_scope_share"] == .5
-    assert report["in_extractor_scope"]["counts"]["fields"] == 1
-    assert report["cases"][0]["in_scope_metrics"]["field_accuracy"] == 1
-    validate_thresholds({"in_scope_field_accuracy": {"min": .9}, "extractor_scope_share": {"min": .1}})
+    assert metrics["field_accuracy"] == 1  # both production fields right
+    assert metrics["counts"]["fields"] == 2
+    assert metrics["reference_field_accuracy"] == 0  # the extractor can't answer it
+    assert metrics["production_field_share"] == pytest.approx(2 / 3)
+    assert metrics["mapping_gap_count"] == 0
+    assert report["cases"][0]["reference_metrics"]["counts"]["fields"] == 1
+    validate_thresholds({"field_accuracy": {"min": .9}, "reference_field_accuracy": {"min": 0}})
+
+
+def test_unmapped_production_field_is_a_reported_mapping_gap(dataset_root):
+    dataset = load_dataset(dataset_root)
+    pred = predictions()["example"]
+    del pred["fields"]["cap_rate"]
+    pred["metadata"] = {"unsupported_schema_fields": ["cap_rate"]}
+    report, _ = run(dataset, dataset.cases, cached={"example": pred})
+    assert report["cases"][0]["mapping_gaps"] == ["cap_rate"]
+    assert report["metrics"]["mapping_gap_count"] == 1
+    assert report["metrics"]["field_accuracy"] == .5  # still scored, never hidden
+
+
+def test_production_scope_must_match_an_extractor_field(dataset_root):
+    edit(dataset_root, "inputs/cases.json", lambda c: c["cases"][0]["requested_fields"]["cap_rate"].update(unit="percent"))
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"]["example"]["cap_rate"].update(unit="percent"))
+    with pytest.raises(ValueError, match=r"example\.cap_rate: Production fields must be named after"):
+        load_dataset(dataset_root)
 
 
 def test_compare_reports_metric_deltas_and_field_flips(dataset_root):
@@ -405,8 +431,8 @@ def test_report_markdown_lists_every_field_with_its_outcome(dataset_root):
     pred_file.write_text(json.dumps(predictions()))
     main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft", "--out", str(dataset_root / "out")])
     markdown = (dataset_root / "out/report.md").read_text()
-    assert "| asking_price | 100 | 100 | ✓ | ✓ | yes |" in markdown
-    assert "| lp_return | missing | missing | ✓ | ✓ | yes |" in markdown
+    assert "| asking_price | 100 | 100 | ✓ | ✓ | production |" in markdown
+    assert "| cap_rate | missing | missing | ✓ | ✓ | production |" in markdown
 
 
 def test_default_pricing_prices_the_default_models_and_flags_unpriced_ones(dataset_root):
@@ -491,14 +517,17 @@ def test_production_named_fields_are_scored_but_aliases_are_not_invented():
     assert "current_noi" not in fields and "proforma_cap_rate" not in fields
 
 
-def test_bundled_dataset_scope_is_unchanged_by_production_field_names():
-    # Guards against a new mapping silently re-scoping existing answer keys.
+def test_bundled_production_fields_are_exactly_what_the_adapter_maps():
     data = load_dataset()
-    in_scope = {(c["case_id"], name) for c in data.cases for name, spec in c["requested_fields"].items()
-                if name in hana_adapter.FIELD_MAP and hana_adapter.FIELD_MAP[name][1] == spec["unit"]}
-    assert len(in_scope) == 14
-    assert not {name for _, name in in_scope} - {"asking_price", "units", "year_built", "building_area", "rentable_area",
-                                                  "occupancy", "loan_amount", "interest_rate", "ltv", "property_address"}
+    production = {(c["case_id"], name) for c in data.cases for name, spec in c["requested_fields"].items()
+                  if spec["scope"] == "production"}
+    mapped = {(c["case_id"], name) for c in data.cases for name, spec in c["requested_fields"].items()
+              if name in hana_adapter.FIELD_MAP and hana_adapter.FIELD_MAP[name][1] == spec["unit"]}
+    assert production == mapped
+    assert len(production) == 24
+    # The relabel renamed equivalent fields; it never changed an answer.
+    assert data.labels["corporate_place"]["noi"]["value"] == 1613150
+    assert data.labels["chicago"]["cap_rate"]["value"] == .0587
 
 
 def test_review_import_can_add_a_described_field(dataset_root):
@@ -516,7 +545,8 @@ def test_review_import_can_add_a_described_field(dataset_root):
         writer.writerows(rows)
     import_review(dataset_root, path, "0.2")
     dataset = load_dataset(dataset_root)
-    assert dataset.cases[0]["requested_fields"]["noi"] == {"unit": "USD", "description": "NOI as REPEDealProfile.noi records it"}
+    assert dataset.cases[0]["requested_fields"]["noi"] == {"unit": "USD", "description": "NOI as REPEDealProfile.noi records it",
+                                                          "scope": "production"}
     assert dataset.labels["example"]["noi"]["value"] == 1470000
     assert dataset.labels["example"]["noi"]["abs_tolerance"] == 1
     assert dataset.evidence["example"]["noi"]["locations"] == [{"document_id": "example_doc", "page": 2}]
@@ -643,3 +673,64 @@ def test_kept_value_with_only_a_possible_conflict_is_scored_by_its_value():
     # Any other uncertain note on the field still withholds it.
     profile.uncertain_information.append("noi: rounded figure in the summary")
     assert hana_adapter.profile_fields(profile, case, incomplete_scope=False)["noi"]["status"] == "uncertain"
+
+
+def test_bundled_review_csv_matches_the_labels():
+    # review.csv is generated from the JSON files; if someone edits one
+    # without the other, CI says so instead of the next import surprising them.
+    import io
+    from backend.evaluation.export_review import COLUMNS, review_rows
+    expected = io.StringIO()
+    writer = csv.DictWriter(expected, fieldnames=COLUMNS, lineterminator="\r\n")
+    writer.writeheader()
+    writer.writerows(review_rows(DEFAULT_ROOT))
+    with (DEFAULT_ROOT / "ground_truth/review.csv").open(newline="", encoding="utf-8") as source:
+        assert source.read() == expected.getvalue()
+
+
+def test_export_then_import_round_trips_and_skips_rows_to_label(dataset_root):
+    from backend.evaluation.export_review import export_review
+    rows = export_review(dataset_root, dataset_root / "review.csv")
+    todo = [r for r in rows if r["review_status"] == "to_label"]
+    assert {r["field"] for r in todo} >= {"noi", "property_type", "address"}
+    assert "asking_price" not in {r["field"] for r in todo}  # already labelled
+    before = {name: (dataset_root / name).read_text() for name in ("ground_truth/labels.json", "ground_truth/evidence.json")}
+    summary = import_review(dataset_root, dataset_root / "review.csv", "draft-2")
+    assert summary["to_label"] == len(todo) and summary["added_fields"] == 0
+    dataset = load_dataset(dataset_root)
+    assert set(dataset.labels["example"]) == {"asking_price", "cap_rate"}
+    assert json.loads(before["ground_truth/labels.json"])["cases"] == json.loads(
+        (dataset_root / "ground_truth/labels.json").read_text())["cases"]
+
+
+def test_filling_a_to_label_row_adds_a_production_field(dataset_root):
+    from backend.evaluation.export_review import export_review
+    path = dataset_root / "review.csv"
+    rows = export_review(dataset_root, path)
+    row = next(r for r in rows if r["field"] == "noi")
+    row.update(review_status="approved", status="present", expected_value="1470000",
+               evidence=json.dumps([{"document_id": "example_doc", "page": 2}]),
+               review_note="Financial summary, in-place NOI", reviewer="Domain Reviewer", reviewed_at="2026-10-20")
+    with path.open("w", newline="", encoding="utf-8") as target:
+        writer = csv.DictWriter(target, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    summary = import_review(dataset_root, path, "0.2.0")
+    assert summary["added_fields"] == 1 and summary["approved"] == 1
+    dataset = load_dataset(dataset_root)
+    assert dataset.scope("example", "noi") == "production"
+    assert dataset.labels["example"]["noi"]["value"] == 1470000
+    assert dataset.labels["example"]["noi"]["reviewer"] == "Domain Reviewer"
+
+
+def test_a_labelled_row_cannot_be_set_back_to_to_label(dataset_root):
+    from backend.evaluation.export_review import export_review
+    path = dataset_root / "review.csv"
+    rows = export_review(dataset_root, path)
+    rows[0]["review_status"] = "to_label"
+    with path.open("w", newline="", encoding="utf-8") as target:
+        writer = csv.DictWriter(target, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    with pytest.raises(ValueError, match=r"line 2 \(example\.asking_price\): A labelled field can't go back"):
+        import_review(dataset_root, path, "0.2.0")

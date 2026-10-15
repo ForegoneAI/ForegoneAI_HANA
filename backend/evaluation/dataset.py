@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from backend.evaluation.fields import PRODUCTION_FIELDS, SCOPES, default_scope
 from backend.evaluation.scoring import location_key
 
 DEFAULT_ROOT = Path(__file__).parent / "benchmark_data"
@@ -81,6 +82,10 @@ class Dataset:
             if sha256(path) != doc["sha256"]:
                 raise ValueError(f"Source checksum mismatch: {did}")
 
+    def scope(self, cid: str, name: str) -> str:
+        case = next(c for c in self.cases if c["case_id"] == cid)
+        return case["requested_fields"][name]["scope"]
+
     def payload(self, case: dict) -> dict:
         # Explicit allowlist rather than copying arbitrary dataset properties:
         # future review notes/expected values cannot accidentally reach the LLM.
@@ -142,6 +147,14 @@ def load_dataset(root: Path = DEFAULT_ROOT) -> Dataset:
                     raise ValueError("Invalid label status")
                 if not isinstance(gold.get("unit"), str) or not gold["unit"] or gold["unit"] != case["requested_fields"][name]["unit"]:
                     raise ValueError("Label/spec unit mismatch")
+                spec = case["requested_fields"][name]
+                spec.setdefault("scope", default_scope(name))
+                if spec["scope"] not in SCOPES:
+                    raise ValueError("Scope must be production or reference")
+                # Production fields are what the headline score counts, so
+                # they must be exactly something the extractor produces.
+                if spec["scope"] == "production" and PRODUCTION_FIELDS.get(name, (None,))[0] != spec["unit"]:
+                    raise ValueError("Production fields must be named after a REPEDealProfile field (fields.py), in its unit")
                 if type(tolerance) not in (int, float) or not math.isfinite(tolerance) or tolerance < 0:
                     raise ValueError("Invalid tolerance")
                 if status == "present" and (value is None or gold.get("candidates")):

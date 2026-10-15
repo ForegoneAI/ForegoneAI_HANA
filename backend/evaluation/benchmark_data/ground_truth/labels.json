@@ -1,5 +1,5 @@
 {
-  "dataset_version": "0.1.0-draft",
+  "dataset_version": "0.1.1-draft",
   "cases": {
     "roderick": {
       "target_equity_raise": {
@@ -469,7 +469,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "building_area": {
+      "square_feet": {
         "status": "present",
         "value": 5662,
         "unit": "sqft",
@@ -561,7 +561,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "current_cap_rate": {
+      "cap_rate": {
         "status": "present",
         "value": 0.0587,
         "unit": "ratio",
@@ -579,7 +579,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "current_noi": {
+      "noi": {
         "status": "present",
         "value": 99813,
         "unit": "USD",
@@ -615,7 +615,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "modeled_loan_amount": {
+      "loan_amount": {
         "status": "present",
         "value": 1275000,
         "unit": "USD",
@@ -624,7 +624,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "modeled_interest_rate": {
+      "interest_rate": {
         "status": "present",
         "value": 0.0375,
         "unit": "ratio",
@@ -684,7 +684,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "current_cap_rate": {
+      "cap_rate": {
         "status": "present",
         "value": 0.0603,
         "unit": "ratio",
@@ -693,7 +693,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "current_noi": {
+      "noi": {
         "status": "present",
         "value": 1613150,
         "unit": "USD",
@@ -702,7 +702,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "rentable_area": {
+      "square_feet": {
         "status": "present",
         "value": 68070,
         "unit": "sqft",
@@ -711,7 +711,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "occupancy": {
+      "occupancy_rate": {
         "status": "present",
         "value": 0.9496,
         "unit": "ratio",
@@ -720,7 +720,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "modeled_loan_amount": {
+      "loan_amount": {
         "status": "present",
         "value": 17387500,
         "unit": "USD",
@@ -738,7 +738,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "modeled_interest_rate": {
+      "interest_rate": {
         "status": "present",
         "value": 0.0425,
         "unit": "ratio",
@@ -747,7 +747,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "modeled_loan_term_years": {
+      "loan_term_years": {
         "status": "present",
         "value": 10,
         "unit": "years",
@@ -893,7 +893,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "property_address": {
+      "address": {
         "status": "missing",
         "value": null,
         "unit": "text",
@@ -902,7 +902,7 @@
         "reviewer": null,
         "reviewed_at": null
       },
-      "sponsor_legal_name": {
+      "sponsor_name": {
         "status": "missing",
         "value": null,
         "unit": "text",

@@ -16,8 +16,9 @@
 - Mean/p95 latency and model cost accounting across returned model responses,
   including schema-repair attempts.
 - Saved-output replay, metric thresholds, dataset validation, and split checks.
-- `in_scope_*` metrics for the fields the production schema can express, next
-  to the headline metrics over every expected field.
+- Every field has a scope. `production` fields are named after a
+  `REPEDealProfile` field and are what the score counts; `reference` fields
+  are labelled facts the extractor has no field for, reported separately.
 - `--compare` against an earlier run: metric deltas and per-field flips.
 - Default list-price pricing for the default models (`pricing.json`).
 - Reports with run IDs, dataset/source hashes, Git revision, package versions,
@@ -61,19 +62,22 @@ OpenRouter (or the reverse).
 
 ## Read the metrics
 
-Headline metrics keep every expected field in the denominator, including
-fields the production `REPEDealProfile` has no field for (for example
-`lot15_pitch_land_cost` or `proforma_noi`). The adapter lists those as
-`unsupported_schema_fields`, and the `in_scope_*` metrics repeat field
-accuracy, grounded accuracy, evidence accuracy, and coverage for the rest.
-`extractor_scope_share` is the fraction of expected fields in scope.
+The score counts **production** fields only: fields named after a
+`REPEDealProfile` field (listed in `fields.py`), in that field's unit. The
+loader rejects a production field the extractor doesn't produce, so the test
+and the extractor can't drift apart. Everything else is a **reference** field,
+a labelled fact the extractor has no place for (for example
+`lot15_pitch_land_cost` or `proforma_noi`). Reference fields appear as
+`reference_*` metrics and in the per-field table, and never lower the score.
+`production_field_share` is the fraction of labelled fields that count, and
+`mapping_gap_count` flags a production field the adapter failed to map.
 
-Dataset 0.1.0-draft has 14 in-scope fields out of 96, and only 4 of the 56
-dev-split fields (all Daly City). Roderick and Opulent are development and
-hospitality packages whose terms the REPE profile can't hold yet. Treat
-`in_scope_*` as the signal for prompt/model changes, and grow it by adding
-domain-reviewed rows named after profile fields (see
-[Add fields](#add-fields)).
+Dataset 0.1.1-draft has 24 production fields and 72 reference fields.
+Equivalent fields were renamed to their profile names (for example
+`current_noi` → `noi`, `rentable_area` → `square_feet`), with a review note on
+each rename. Values were not changed. The dev split has only 4 production
+fields (Daly City) until the domain team labels the `to_label` rows (see
+[Domain review](#domain-review)).
 
 ## Evaluate models with OpenRouter
 
@@ -146,29 +150,44 @@ PDF evidence uses physical, one-indexed pages. Workbook evidence uses exact
 sheet names and cells. Currency uses base units, percentages use ratios
 (`15%` → `0.15`), and ranges retain both endpoints.
 
-## Import reviewed labels
+## Domain review
 
-Edit `ground_truth/review.csv`, including values, evidence, review status,
-reviewer name, and ISO review date. Validate and import with a new version:
+`ground_truth/review.csv` is the worksheet for the domain team. Open it in
+Excel or Google Sheets, with the matching deal documents to hand. It has
+one row per question:
+
+- **Labelled rows** (`review_status` = `pending_domain_review`): check the
+  answer against the document and fix it if needed.
+  - `status`: `present`, `missing` (the documents don't state it), or
+    `conflict` (they state different values; put every value in `candidates`).
+  - `expected_value`: a number in base units (`2100000`, ratios like `0.0587`
+    for 5.87%), quoted text (`"Multifamily"`), or `null` for missing/conflict.
+  - `evidence`: the page(s) it's on, such as `[{"document_id": "daly_city", "page": 3}]`.
+  - When it's right, set `review_status` to `approved` and fill in `reviewer`
+    and `reviewed_at` (`2026-10-20`).
+- **`to_label` rows**: H9N production fields a deal has no answer for yet
+  (property type, NOI, cap rate, sponsor…). These decide how much the score
+  measures, especially for Roderick and Opulent. Fill in `status`,
+  `expected_value` and `evidence`, then set `review_status` to
+  `pending_domain_review` or `approved`. Leave a row as `to_label` to skip it.
+- `description` says what each question means. `scope` says whether it
+  counts in the score (`production`) or not (`reference`).
+
+Then validate, import with a new version, and commit the changed files:
 
 ```bash
-python -m backend.evaluation.import_review --version 0.2.0 --check
+python -m backend.evaluation.import_review --version 0.2.0 --check   # dry run, writes nothing
 python -m backend.evaluation.import_review --version 0.2.0
+python -m backend.evaluation.export_review                           # refresh review.csv
+git add backend/evaluation/benchmark_data && git commit -m "M1.4: domain-reviewed labels v0.2.0"
 ```
 
-The importer validates the complete worksheet before replacing JSON files and
-updates the version in both cases and labels. Commit the reviewed metadata diff.
-Run evaluation without `--allow-draft` to enforce approved-label checks.
-
-## Add fields
-
-Add a row to `ground_truth/review.csv` with a field name the case doesn't
-have yet and fill the extra `description` column (and `abs_tolerance` if a
-numeric tolerance is needed). The importer adds the field to the case
-specification, labels, and evidence. To have the production extractor scored
-on it, use the `REPEDealProfile` field name, such as `noi`, `cap_rate`,
-`property_type`, `address`, or `sponsor_name`. Units follow the conventions
-above (`cap_rate` as a ratio, `0.079`). Other names stay benchmark-only.
+The importer validates the whole worksheet before writing anything. An error
+names the spreadsheet line and field. The import never approves rows by
+itself, and new fields named after profile fields are added as production
+fields. Once every label is approved, run the evaluation without
+`--allow-draft`. A CI test fails if `review.csv` and the JSON files drift
+apart, so always re-export after an import.
 
 ## Replay saved predictions
 

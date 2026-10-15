@@ -1,8 +1,8 @@
 """Evaluate the existing production PDF extractor without database writes.
 
-Mappings are deliberately conservative: generic `noi` cannot stand for both
-current and pro-forma NOI, and a profile's square_feet cannot stand for lot
-area. Expanding production coverage requires an explicit semantic mapping.
+Only benchmark fields named after a REPEDealProfile field are mapped (see
+fields.py): generic `noi` is never stretched over both current and pro-forma
+NOI, and square_feet never stands for lot area. Other fields are reference.
 The adapter never imports labels/evidence or introduces a benchmark prompt.
 """
 
@@ -19,39 +19,20 @@ from backend.app.h9n.extraction.repe_extractor import (
 )
 from backend.app.h9n.extraction.telemetry import capture_model_usage
 from backend.app.h9n.ingestion.pdf_reader import PdfReadError, read_pdf
+from backend.evaluation.fields import PERCENT_FIELDS, PRODUCTION_FIELDS
 from backend.evaluation.scoring import equal
 
-# benchmark name -> (production name, benchmark unit, normalization factor).
-# Production stores percentages as 6.5; the supplied labels use ratio .065.
-FIELD_MAP = {
-    "asking_price": ("asking_price", "USD", 1),
-    "units": ("units", "count", 1),
-    "year_built": ("year_built", "year", 1),
-    "building_area": ("square_feet", "sqft", 1),
-    "rentable_area": ("square_feet", "sqft", 1),
-    "occupancy": ("occupancy_rate", "ratio", .01),
-    "loan_amount": ("loan_amount", "USD", 1),
-    "interest_rate": ("interest_rate", "ratio", .01),
-    "ltv": ("ltv", "ratio", .01),
-    "property_address": ("address", "text", 1),
-}
 # "conflicting_evidence" is M1.2's own cross-passage check; "model_conflicting"
 # is the model's flag. Both mean the document disagrees with itself.
 CONFLICT_REASONS = {"model_conflicting", "conflicting_evidence"}
-# Benchmark fields named after a production field test that field exactly as
-# REPEDealProfile defines it, so adding domain-reviewed rows with these names
-# (import_review.py) grows the scored scope without new semantic aliases.
-PRODUCTION_FIELD_UNITS = {
-    "deal_name": "text", "property_name": "text", "property_type": "text", "address": "text",
-    "location": "text", "market": "text", "submarket": "text", "transaction_type": "text",
-    "sponsor_name": "text", "units": "count", "square_feet": "sqft", "year_built": "year",
-    "asking_price": "USD", "annual_revenue": "USD", "operating_expenses": "USD", "noi": "USD",
-    "loan_amount": "USD", "sponsor_equity": "USD", "loan_term_years": "years",
-    "occupancy_rate": "ratio", "cap_rate": "ratio", "interest_rate": "ratio", "ltv": "ratio",
-}
-PERCENT_FIELDS = {"occupancy_rate", "cap_rate", "interest_rate", "ltv"}
-for _name, _unit in PRODUCTION_FIELD_UNITS.items():
-    FIELD_MAP.setdefault(_name, (_name, _unit, .01 if _name in PERCENT_FIELDS else 1))
+
+# benchmark name -> (production name, benchmark unit, normalization factor).
+# Identity only: a benchmark field scores the extractor when it is named after
+# the REPEDealProfile field it tests (backend/evaluation/fields.py), so no
+# alias can quietly stretch one profile field over two different facts.
+# Production stores percentages as 6.5; the labels use ratios (.065).
+FIELD_MAP = {name: (name, unit, .01 if name in PERCENT_FIELDS else 1)
+             for name, (unit, _) in PRODUCTION_FIELDS.items()}
 
 
 def profile_fields(profile, case: dict, *, incomplete_scope: bool) -> dict:

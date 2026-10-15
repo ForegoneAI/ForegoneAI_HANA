@@ -292,12 +292,13 @@ python -m backend.evaluation.evaluate --allow-draft --compare backend/evaluation
 ```
 
 The report covers field accuracy, missing-field detection, unsupported (hallucinated) extraction
-rate, evidence-page correctness, latency, and approximate model cost, for every expected field and
-separately for the fields the extractor's schema can express (`in_scope_*`). `--compare` shows what
-changed since an earlier run, so it can be rerun after any prompt or model change. The reserved
+rate, evidence-page correctness, latency, and approximate model cost. The score counts only the
+fields H9N's extractor produces; labelled facts it has no field for are reported separately as
+`reference`. `--compare` shows what changed since an earlier run, so it can be rerun after any prompt or model change. The reserved
 cases need `--split holdout --unlock-holdout`; labels stay drafts (`--allow-draft`) until the domain
-team approves them through `review.csv`. See [evaluation/README.md](evaluation/README.md) for
-restoring source files, reviewing labels, adding fields, pricing, thresholds, and replay.
+team approves them through `review.csv`, which also lists the H9N fields each deal still needs an
+answer for. See [evaluation/README.md](evaluation/README.md) for restoring source files, domain
+review, pricing, thresholds, and replay.
 
 `cases.py`'s synthetic deals remain for `demo_end_to_end.py` and the free scoring tests
 (`test_evaluate.py`); they prove the extractor reads clearly-stated facts back correctly, not how it

@@ -644,7 +644,7 @@
       ],
       "review_note": ""
     },
-    "building_area": {
+    "square_feet": {
       "locations": [
         {
           "document_id": "daly_city",
@@ -652,7 +652,7 @@
           "note": ""
         }
       ],
-      "review_note": ""
+      "review_note": "Renamed from building_area to the profile field square_feet; domain review should confirm they mean the same thing."
     },
     "lot_area": {
       "locations": [
@@ -739,7 +739,7 @@
       ],
       "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
     },
-    "current_cap_rate": {
+    "cap_rate": {
       "locations": [
         {
           "document_id": "chicago",
@@ -747,7 +747,7 @@
           "note": ""
         }
       ],
-      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment. Renamed from current_cap_rate to the profile field cap_rate; domain review should confirm they mean the same thing."
     },
     "proforma_cap_rate": {
       "locations": [
@@ -759,7 +759,7 @@
       ],
       "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
     },
-    "current_noi": {
+    "noi": {
       "locations": [
         {
           "document_id": "chicago",
@@ -772,7 +772,7 @@
           "note": "Alternative supporting location; same field scope."
         }
       ],
-      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment. Renamed from current_noi to the profile field noi; domain review should confirm they mean the same thing."
     },
     "proforma_noi": {
       "locations": [
@@ -819,7 +819,7 @@
       ],
       "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
     },
-    "modeled_loan_amount": {
+    "loan_amount": {
       "locations": [
         {
           "document_id": "chicago",
@@ -827,9 +827,9 @@
           "note": ""
         }
       ],
-      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment. Renamed from modeled_loan_amount to the profile field loan_amount; domain review should confirm they mean the same thing."
     },
-    "modeled_interest_rate": {
+    "interest_rate": {
       "locations": [
         {
           "document_id": "chicago",
@@ -837,7 +837,7 @@
           "note": ""
         }
       ],
-      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment. Renamed from modeled_interest_rate to the profile field interest_rate; domain review should confirm they mean the same thing."
     },
     "modeled_amortization_years": {
       "locations": [
@@ -894,7 +894,7 @@
       ],
       "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
     },
-    "current_cap_rate": {
+    "cap_rate": {
       "locations": [
         {
           "document_id": "corporate_place",
@@ -902,9 +902,9 @@
           "note": ""
         }
       ],
-      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from current_cap_rate to the profile field cap_rate; domain review should confirm they mean the same thing."
     },
-    "current_noi": {
+    "noi": {
       "locations": [
         {
           "document_id": "corporate_place",
@@ -912,9 +912,9 @@
           "note": ""
         }
       ],
-      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from current_noi to the profile field noi; domain review should confirm they mean the same thing."
     },
-    "rentable_area": {
+    "square_feet": {
       "locations": [
         {
           "document_id": "corporate_place",
@@ -932,9 +932,9 @@
           "note": "Alternative supporting location; same field scope."
         }
       ],
-      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from rentable_area to the profile field square_feet; domain review should confirm they mean the same thing."
     },
-    "occupancy": {
+    "occupancy_rate": {
       "locations": [
         {
           "document_id": "corporate_place",
@@ -947,9 +947,9 @@
           "note": "Alternative supporting location; same field scope."
         }
       ],
-      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from occupancy to the profile field occupancy_rate; domain review should confirm they mean the same thing."
     },
-    "modeled_loan_amount": {
+    "loan_amount": {
       "locations": [
         {
           "document_id": "corporate_place",
@@ -957,7 +957,7 @@
           "note": ""
         }
       ],
-      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from modeled_loan_amount to the profile field loan_amount; domain review should confirm they mean the same thing."
     },
     "modeled_down_payment": {
       "locations": [
@@ -969,7 +969,7 @@
       ],
       "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
     },
-    "modeled_interest_rate": {
+    "interest_rate": {
       "locations": [
         {
           "document_id": "corporate_place",
@@ -977,9 +977,9 @@
           "note": ""
         }
       ],
-      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from modeled_interest_rate to the profile field interest_rate; domain review should confirm they mean the same thing."
     },
-    "modeled_loan_term_years": {
+    "loan_term_years": {
       "locations": [
         {
           "document_id": "corporate_place",
@@ -987,7 +987,7 @@
           "note": ""
         }
       ],
-      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from modeled_loan_term_years to the profile field loan_term_years; domain review should confirm they mean the same thing."
     },
     "levered_irr": {
       "locations": [
@@ -1139,13 +1139,13 @@
       ],
       "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
     },
-    "property_address": {
+    "address": {
       "locations": [],
-      "review_note": "No subject property address supplied in this workbook."
+      "review_note": "No subject property address supplied in this workbook. Renamed from property_address to the profile field address; domain review should confirm they mean the same thing."
     },
-    "sponsor_legal_name": {
+    "sponsor_name": {
       "locations": [],
-      "review_note": "No sponsor legal entity supplied in this workbook."
+      "review_note": "No sponsor legal entity supplied in this workbook. Renamed from sponsor_legal_name to the profile field sponsor_name; domain review should confirm they mean the same thing."
     }
   }
 }

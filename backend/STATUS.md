@@ -87,12 +87,16 @@ pages/cells (`ground_truth/evidence.json`) are stored separately from any extrac
 source files are pinned by SHA-256 in `inputs/manifest.json`, and the sources themselves stay out of
 Git (restore them with `python -m backend.evaluation.restore_inputs`).
 
+Every field is `production` (named after a `REPEDealProfile` field, counted in the score) or
+`reference` (a labelled fact the extractor has no field for, reported separately). Version
+0.1.1-draft renamed equivalent fields to their profile names: 24 production, 72 reference.
+
 **Still needed from people, not code:** every label is `pending_domain_review`. The domain team
-reviews `ground_truth/review.csv` and imports it with `python -m backend.evaluation.import_review
---version 0.2.0`; until then reports say `DRAFT_NOT_DOMAIN_APPROVED`. The same worksheet can add
-fields: today only 14 of the 96 fields map to something `REPEDealProfile` can hold, so adding
-reviewed rows for profile fields (`noi`, `cap_rate`, `property_type`, ...) is the fastest way to make
-the benchmark measure more of the extractor.
+works through `ground_truth/review.csv`, checking the 96 labelled rows and filling the 114
+`to_label` rows: the H9N fields each deal has no answer for yet, which Roderick and Opulent need
+before the dev split measures much. Then they import it with `python -m
+backend.evaluation.import_review --version 0.2.0` and commit. Until then, reports say
+`DRAFT_NOT_DOMAIN_APPROVED`.
 
 The older synthetic cases in `cases.py` remain for the demo and the free scoring tests.
 
@@ -106,8 +110,8 @@ python -m backend.evaluation.evaluate --allow-draft --out backend/evaluation/rep
 ```
 
 It reports field accuracy, missing-field detection, unsupported extraction rate, evidence-page
-correctness, latency, and approximate model cost (from `evaluation/pricing.json`), both over every
-expected field and over the fields the extractor can express (`in_scope_*`). `--compare
+correctness, latency, and approximate model cost (from `evaluation/pricing.json`), counting every
+production field (labelled facts the extractor has no field for are reported separately). `--compare
 <earlier report.json>` lists what changed after a prompt or model change, `--provider`/`--model`
 switch between Anthropic and OpenRouter models, and `--predictions` replays a saved run for free.
 This calls the real model and costs money, so it's run by hand; the runner, scoring, dataset checks
