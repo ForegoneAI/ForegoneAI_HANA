@@ -1,6 +1,9 @@
 from typing import Optional
 
+from pydantic import computed_field
+
 from .base_deal import BaseDeal
+from .field_status import FieldStatusReport, assess_fields
 
 
 # Represents a Real Estate Private Equity deal
@@ -37,3 +40,14 @@ class REPEDealProfile(BaseDeal):
     sponsor_equity: Optional[float] = None
     investment_strategy: Optional[str] = None
     business_plan: Optional[str] = None
+
+    # How far each value field can be trusted - "supported", "uncertain",
+    # "missing" or "conflicting" - and why (Milestone 1.2). Computed from the
+    # rest of the profile every time it's read or serialized, so it is always
+    # current and appears in every API response that returns a profile; it
+    # can't be set directly, and an incoming copy of it is ignored. See
+    # schemas/field_status.py.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def field_statuses(self) -> dict[str, FieldStatusReport]:
+        return assess_fields(self)

@@ -40,8 +40,10 @@ class FieldEvidence(BaseModel):
 
 
 # Why an extracted value was kept out of its field (Milestone 1.1). The first
-# five mean the model's citation didn't hold up; the last three mean the model
-# itself said the value shouldn't be taken at face value.
+# five mean the model's citation didn't hold up; the next three mean the model
+# itself said the value shouldn't be taken at face value. The last
+# (Milestone 1.2) means H9N's own checks found the document stating a
+# different value for the field elsewhere - see WithheldValue.conflicting_values.
 WithheldReason = Literal[
     "no_evidence",
     "page_not_in_document",
@@ -51,7 +53,24 @@ WithheldReason = Literal[
     "model_uncertain",
     "model_conflicting",
     "model_listed_as_missing",
+    "conflicting_evidence",
 ]
+
+
+# One value the source document states for a field whose passages disagree
+# (Milestone 1.2), with the verified passage that states it. A conflict keeps
+# one of these for every passage found - the extracted value's and each
+# disagreeing one - so a reviewer sees both sides instead of whichever value
+# the model happened to pick.
+class ConflictingValue(BaseModel):
+
+    # The value as this passage states it, normalized like the field itself
+    # (e.g. "$9.5M" -> 9500000, "6.25%" -> 6.25).
+    value: Union[int, float, str]
+
+    # Where the document states it. Always a verified citation: the quoted
+    # passage is on the cited page and contains `value`.
+    evidence: FieldEvidence
 
 
 # A value the extractor proposed but could not verify, held back for a human
@@ -79,6 +98,13 @@ class WithheldValue(BaseModel):
     # The citation the model gave, if any, so the reviewer can jump straight
     # to where it claimed the value came from.
     evidence: Optional[FieldEvidence] = None
+
+    # Every passage found for a field whose source passages disagree
+    # (reason "conflicting_evidence", or "model_conflicting" when the
+    # disagreeing passages could be verified) - the proposed value's own
+    # passage included - so both sides are preserved for review (Milestone
+    # 1.2). Empty for every other reason.
+    conflicting_values: list[ConflictingValue] = Field(default_factory=list)
 
 
 # Contains fields shared by both PE and REPE deals
