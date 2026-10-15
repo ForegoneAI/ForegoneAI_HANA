@@ -27,6 +27,14 @@ Two layers stand between the model and the database:
    not stored either. Everything not stored is left null in the profile and
    recorded in `withheld_values` with the proposed value, the reason, and the
    citation, so a human reviewer can accept or dismiss it (Milestone 2).
+
+3. Milestone 1.2 adds conflict detection to `enforce_integrity`: a numeric
+   value is withheld as "conflicting_evidence" when the document states a
+   different value for the same field elsewhere - either in another passage
+   the model cited, or after the same label ("Asking Price: $9,500,000" on
+   page 5 against "Asking Price: $10,000,000" on page 1). Every passage found
+   is kept in the withheld entry's `conflicting_values`, so both sides reach
+   the reviewer. See `_conflicting_passages` for exactly what counts.
 """
 
 from __future__ import annotations
@@ -40,7 +48,14 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Union, get_a
 
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
-from backend.app.h9n.schemas.base_deal import EvidenceVerification, FieldEvidence, WithheldReason, WithheldValue
+from backend.app.h9n.schemas.base_deal import (
+    ConflictingValue,
+    EvidenceVerification,
+    FieldEvidence,
+    WithheldReason,
+    WithheldValue,
+)
+from backend.app.h9n.schemas.field_status import note_names_field
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 
 
@@ -637,12 +652,9 @@ def _fields_listed_as_missing(notes: list[str]) -> dict[str, str]:
     "cap rate not stated"), mapped to the note."""
     named: dict[str, str] = {}
     for note in notes:
-        folded = note.strip().casefold()
         for field_name in VALUE_FIELDS:
-            for label in (field_name, field_name.replace("_", " ")):
-                rest = folded[len(label) :]
-                if folded.startswith(label) and not (rest[:1].isalnum() or rest[:1] == "_"):
-                    named.setdefault(field_name, note)
+            if note_names_field(note, field_name):
+                named.setdefault(field_name, note)
     return named
 
 
@@ -653,14 +665,305 @@ def _evidence_by_field(entries: list[ExtractedEvidence]) -> dict[str, list[Extra
     return grouped
 
 
+# --- Conflict detection (Milestone 1.2) --------------------------------------
+#
+# A field is "conflicting" when the document itself states two different
+# values for it. The model is asked to flag that, but H9N also checks for it
+# deterministically, in two ways:
+#
+# 1. Another passage the model cited for the field states a different value,
+#    and that passage verifies (it is on the cited page and contains the
+#    value it was cited for). Numeric fields only, unless the model itself
+#    flagged the field as conflicting - two text passages naming a property
+#    differently ("Meadowbrook" / "Meadowbrook Apartments") aren't a conflict.
+# 2. For a numeric field, the label in front of the extracted value's own
+#    citation ("asking price" in "Asking Price: $10,000,000") appears at the
+#    start of another line or sentence, directly followed by a different
+#    value of the same kind ("Asking Price: $9,500,000" on page 5).
+#
+# Only obvious conflicts count, because a conflict withholds the value: a
+# label must be specific (not "Total:" or "Price:"), a line holding several
+# figures after the label (a year-by-year or sensitivity row, "6.0%-6.5%")
+# is ignored, and every passage is verified the same way as a citation.
+
+# A label longer than this is a sentence, not a label.
+MAX_LABEL_CHARS = 40
+
+# Only the first this-many passages are kept for one field.
+MAX_CONFLICT_PASSAGES = 10
+
+# A line (or sentence of a long line) longer than this is too long to quote.
+MAX_PASSAGE_CHARS = 300
+
+# Labels too generic to say which figure they introduce.
+_GENERIC_LABELS = {
+    "amount",
+    "price",
+    "rate",
+    "total",
+    "totals",
+    "value",
+    "year",
+    "years",
+    "per unit",
+    "per sf",
+    "per year",
+    "subtotal",
+}
+
+# What may sit between a label and its figure: separators, a currency sign or
+# an opening parenthesis ("Asking Price: $10M", "NOI ... ($150,000)").
+_LABEL_GAP = re.compile(r"[ \t:=|.\-–—$(]*(?:usd\b)?[ \t$(\-]*")
+_LABEL_TAIL = re.compile(r"(?:\busd\b|[\s:=|.\-–—$(])*$")
+_LABEL_START_CHARS = set("|•·*;:,(")
+_SENTENCE_SPLIT = re.compile(r"(?<=[.;])\s+")
+
+
+def _coerce(field_name: str, value: float) -> Optional[Union[int, float]]:
+    """`value` as the field would store it, or None if the field can't hold
+    it (a fractional unit count, a 650% cap rate)."""
+    if field_name in _INTEGER_FIELDS:
+        if not float(value).is_integer():
+            return None
+        value = int(value)
+    try:
+        ReviewerCorrections.model_validate({field_name: value})
+    except ValueError:  # pydantic's ValidationError is a ValueError
+        return None
+    return value
+
+
+def _candidate_value(field_name: str, number: _Number) -> Optional[Union[int, float]]:
+    """The field value a number in the text stands for, or None if it can't
+    be one (wrong kind for the field, or a value the field can't hold)."""
+    if number.kind not in _SUPPORTING_KINDS.get(field_name, {"plain"}):
+        return None
+    value = number.value
+    if field_name in _PERCENT_FIELDS and number.kind == "plain" and 0 < value <= 1:
+        value = value * 100  # "Occupancy: 0.94" is 94%
+    return _coerce(field_name, value)
+
+
+def _same_value(field_name: str, first: Any, second: Any) -> bool:
+    if field_name in NUMERIC_FIELDS:
+        return math.isclose(float(first), float(second), rel_tol=1e-9, abs_tol=1e-9)
+    return _WORD.findall(_normalize(str(first))) == _WORD.findall(_normalize(str(second)))
+
+
+def _clean_label(text: str) -> str:
+    label = _LABEL_TAIL.sub("", text)
+    return label.strip(" \t•·*|;,-–—")
+
+
+def _label_for(field_name: str, value: Any, snippet: str) -> Optional[str]:
+    """The label right before `value` in its citation ("asking price" in
+    "Asking Price: $10,000,000"), normalized, or None if there isn't a
+    specific one. In a table quote ("Units ... 400") the label is the piece
+    before the ellipsis."""
+    quote = _normalize(snippet)
+    number = next((n for n in _numbers(quote) if _number_supports(field_name, value, n)), None)
+    if number is None:
+        return None
+    head = quote[: number.start]
+    line_start = head.rfind("\n") + 1
+    ellipsis = head.rfind("...")
+    if ellipsis >= line_start:
+        label = _clean_label(head[ellipsis + 3 :])
+        if not label:
+            before = head[:ellipsis]
+            piece_start = max(before.rfind("\n") + 1, before.rfind("...") + 3 if "..." in before else 0)
+            label = _clean_label(before[piece_start:])
+    else:
+        label = _clean_label(head[line_start:])
+    letters = sum(char.isalpha() for char in label)
+    if letters < 3 or len(label) > MAX_LABEL_CHARS or label in _GENERIC_LABELS:
+        return None
+    return label
+
+
+def _passages(page_text: str) -> list[str]:
+    """The page's lines, long lines split into sentences, each short enough to quote."""
+    pieces = []
+    for line in page_text.splitlines():
+        for piece in _SENTENCE_SPLIT.split(line) if len(line.strip()) > MAX_PASSAGE_CHARS else [line]:
+            piece = piece.strip()
+            if MIN_SNIPPET_CHARS <= len(piece) <= MAX_PASSAGE_CHARS:
+                pieces.append(piece)
+    return pieces
+
+
+def _ambiguous_figure(field_name: str, text: str, figure: _Number, rest: list[_Number]) -> bool:
+    """Whether a figure after a label might not be the field's value: another
+    figure of a kind the field accepts follows it on the line (a row of years
+    or scenarios, a range), or it is a bare number followed by a word that
+    says what it counts ("4 offers received")."""
+    kinds = _SUPPORTING_KINDS.get(field_name, {"plain"})
+    if any(number.kind in kinds for number in rest):
+        return True
+    if figure.kind == "plain":
+        suffix = _SUFFIX.match(text, figure.end)
+        after = suffix.end() if suffix and (suffix.group("percent") or suffix.group("scale")) else figure.end
+        if _FOLLOWING_WORD.match(text, after):
+            return True
+    return False
+
+
+def _labelled_value(field_name: str, label: str, passage: str) -> Optional[Union[int, float]]:
+    """The single figure `label` introduces in `passage`, or None."""
+    text = _normalize(passage)
+    numbers = _numbers(text)
+    start = text.find(label)
+    while start != -1:
+        end = start + len(label)
+        before = text[:start].rstrip()
+        starts_clause = not before or before[-1] in _LABEL_START_CHARS or (
+            before[-1] == "." and not before[-2:-1].isdigit()
+        )
+        ends_word = end == len(text) or not text[end].isalnum()
+        if starts_clause and ends_word:
+            gap_end = _LABEL_GAP.match(text, end).end()
+            if gap_end - end <= 12:
+                following = [n for n in numbers if n.start >= gap_end]
+                first = following[0] if following else None
+                if first is not None and first.start == gap_end:
+                    if _ambiguous_figure(field_name, text, first, following[1:]):
+                        return None
+                    return _candidate_value(field_name, first)
+        start = text.find(label, start + 1)
+    return None
+
+
+def _same_passage(evidence: Optional[FieldEvidence], page: dict[str, Any], passage: str) -> bool:
+    """Whether `passage` is (part of) the place `evidence` quotes."""
+    if evidence is None or evidence.page_number != page["page_number"] or not evidence.snippet:
+        return False
+    if _normalize(evidence.source_document or "") != _normalize(page.get("file_name", evidence.source_document or "")):
+        return False
+    return _find_quote(evidence.snippet, passage) is not None
+
+
+def _verified_passage(
+    field_name: str, value: Any, snippet: str, page: dict[str, Any], *, cited_document: Optional[str] = None
+) -> Optional[ConflictingValue]:
+    problem, verification = _verification(field_name, value, snippet, page["text"])
+    if problem is not None or verification != "value_matched":
+        return None
+    return ConflictingValue(
+        value=value,
+        evidence=FieldEvidence(
+            field_name=field_name,
+            value=_display(value),
+            source_document=page.get("file_name", cited_document),
+            page_number=page["page_number"],
+            snippet=snippet,
+            verification="value_matched",
+        ),
+    )
+
+
+def _cited_value(field_name: str, entry: ExtractedEvidence, page: dict[str, Any]) -> Optional[ConflictingValue]:
+    """The value another citation of the field states, if its passage verifies it."""
+    if field_name not in NUMERIC_FIELDS:
+        return _verified_passage(field_name, entry.value, entry.snippet, page, cited_document=entry.source_document)
+    # The citation's `value` is display text ("$9.5M", "6.25%", "0.94"); the
+    # passage itself decides which reading of it is meant.
+    numbers = _numbers(_normalize(entry.value))
+    if len(numbers) != 1:
+        return None
+    readings = [numbers[0].value]
+    if field_name in _PERCENT_FIELDS and numbers[0].kind == "plain" and 0 < numbers[0].value <= 1:
+        readings.insert(0, numbers[0].value * 100)  # a fraction is a percentage, as in the prompt
+    for reading in readings:
+        candidate = _coerce(field_name, reading)
+        if candidate is None:
+            continue
+        found = _verified_passage(field_name, candidate, entry.snippet, page, cited_document=entry.source_document)
+        if found is not None:
+            return found
+    return None
+
+
+def _conflicting_passages(
+    field_name: str,
+    value: Any,
+    entries: list[ExtractedEvidence],
+    pages: list[dict[str, Any]],
+    verified: Optional[FieldEvidence],
+    *,
+    model_flagged_conflict: bool,
+) -> list[ConflictingValue]:
+    """Other verified passages for the field, if at least one of them states a
+    different value than `value` - else []. Passages stating the same value
+    are kept too (they show where each side is stated); `verified` itself
+    isn't repeated."""
+    found: list[ConflictingValue] = []
+
+    # 1. Other passages the model cited for this field.
+    if field_name in NUMERIC_FIELDS or model_flagged_conflict:
+        for entry in entries:
+            page, _ = _find_page(entry, pages)
+            if page is None:
+                continue
+            passage = _cited_value(field_name, entry, page)
+            if passage is not None and not _same_passage(verified, page, entry.snippet):
+                found.append(passage)
+
+    # 2. The same label elsewhere in the document.
+    label = (
+        _label_for(field_name, value, verified.snippet)
+        if field_name in NUMERIC_FIELDS and verified is not None and verified.verification == "value_matched"
+        else None
+    )
+    if label:
+        for page in pages:
+            for passage in _passages(page["text"]):
+                if _same_passage(verified, page, passage):
+                    continue
+                candidate = _labelled_value(field_name, label, passage)
+                if candidate is None:
+                    continue
+                checked = _verified_passage(field_name, candidate, passage, page)
+                if checked is not None:
+                    found.append(checked)
+
+    if not any(not _same_value(field_name, passage.value, value) for passage in found):
+        return []
+
+    unique: list[ConflictingValue] = []
+    seen: set[tuple[Any, ...]] = set()
+    for passage in found:
+        key = (
+            _normalize(passage.evidence.source_document or ""),
+            passage.evidence.page_number,
+            _normalize(passage.evidence.snippet or ""),
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(passage)
+    return unique[:MAX_CONFLICT_PASSAGES]
+
+
+def _describe_conflict(values: list[ConflictingValue]) -> str:
+    """The reviewer-facing summary of a conflict, e.g. "The document gives
+    different values: 10000000 (deal.pdf p.1), 9500000 (deal.pdf p.5)."."""
+    where: dict[str, list[str]] = {}
+    for passage in values:
+        evidence = passage.evidence
+        where.setdefault(_display(passage.value), []).append(f"{evidence.source_document} p.{evidence.page_number}")
+    listed = ", ".join(f"{value} ({'; '.join(places)})" for value, places in where.items())
+    return f"The document gives different values: {listed}."
+
+
 def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]]) -> REPEDealProfile:
     """Turns a validated extraction into a REPEDealProfile holding only verified values.
 
     Every non-null value lands in exactly one of two places:
-    - its field, with its evidence, when a citation checks out and the model
-      neither flagged it nor listed it as missing; or
+    - its field, with its evidence, when a citation checks out, the model
+      neither flagged it nor listed it as missing, and no other passage of the
+      document states a different value for it (Milestone 1.2); or
     - `withheld_values` (its field left null), with the reason and whatever
-      citation the model gave, for a human reviewer to accept or dismiss.
+      citation the model gave, for a human reviewer to accept or dismiss. A
+      conflict also keeps every passage found, in `conflicting_values`.
     """
     evidence_by_field = _evidence_by_field(output.evidence)
     flags_by_field: dict[str, list[FieldFlag]] = defaultdict(list)
@@ -671,20 +974,39 @@ def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]])
     values: dict[str, Any] = {}
     kept_evidence: list[FieldEvidence] = []
     withheld: list[WithheldValue] = []
+    detected_conflicts: list[str] = []
 
     for field_name in VALUE_FIELDS:
         value = getattr(output, field_name)
         if value is None:
             continue
 
-        check = _check_field(field_name, value, evidence_by_field.get(field_name, []), pages)
+        entries = evidence_by_field.get(field_name, [])
+        check = _check_field(field_name, value, entries, pages)
         cited = check.verified or (check.failure[2] if check.failure else None)
         flags = flags_by_field.get(field_name)
+        model_conflicting = any(flag.flag == "conflicting" for flag in flags or [])
 
-        if flags:
-            reason: WithheldReason = (
-                "model_conflicting" if any(flag.flag == "conflicting" for flag in flags) else "model_uncertain"
-            )
+        others = _conflicting_passages(
+            field_name, value, entries, pages, check.verified, model_flagged_conflict=model_conflicting
+        )
+        conflicting_values = (
+            ([ConflictingValue(value=value, evidence=check.verified)] if check.verified else []) + others
+            if others
+            else []
+        )
+
+        if model_conflicting:
+            reason: WithheldReason = "model_conflicting"
+            detail = "; ".join(flag.note for flag in flags or [])
+        elif conflicting_values:
+            reason = "conflicting_evidence"
+            detail = _describe_conflict(conflicting_values)
+            detected_conflicts.append(f"{field_name}: {detail}")
+            if flags:
+                detail = f"{detail} Also flagged: {'; '.join(flag.note for flag in flags)}"
+        elif flags:
+            reason = "model_uncertain"
             detail = "; ".join(flag.note for flag in flags)
         elif field_name in listed_missing:
             reason = "model_listed_as_missing"
@@ -704,7 +1026,14 @@ def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]])
         if cited is not None:
             cited = cited.model_copy(update={"verification": None})
         withheld.append(
-            WithheldValue(field_name=field_name, proposed_value=value, reason=reason, detail=detail, evidence=cited)
+            WithheldValue(
+                field_name=field_name,
+                proposed_value=value,
+                reason=reason,
+                detail=detail,
+                evidence=cited,
+                conflicting_values=conflicting_values,
+            )
         )
 
     uncertain_information = [
@@ -712,7 +1041,7 @@ def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]])
     ]
     conflicting_information = [
         f"{flag.field_name}: {flag.note}" for flag in output.field_flags if flag.flag == "conflicting"
-    ]
+    ] + detected_conflicts
 
     return REPEDealProfile(
         **values,
