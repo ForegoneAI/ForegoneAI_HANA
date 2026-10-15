@@ -47,6 +47,14 @@ fields, `conflicting_information` flags contradictions instead of silently picki
 calculated or inferred, or the wording was ambiguous. See the "Uncertainty flagging" section of
 the [README](./README.md).
 
+**Milestone 1.2 (2026-10-15):** every value field now also has one structured status -
+`supported`, `uncertain`, `missing` or `conflicting` - with a `needs_review` flag and reason codes,
+in `field_statuses` on every profile the API returns, so a UI doesn't have to parse the notes
+above. H9N also detects conflicts itself and keeps every passage for the reviewer: cited passages
+that disagree withhold the value; the same label with a different figure elsewhere (often in-place
+vs pro forma, or two loans) keeps the value but flags it. Statuses are also saved per extraction
+run (`extraction_field_statuses`). See "Field status" in the [README](./README.md).
+
 ## 4. Human Review and Correction — ✅ Done
 
 Every extracted deal is now saved (`app/h9n/review/store.py`, `DealStore`) and can be fetched or

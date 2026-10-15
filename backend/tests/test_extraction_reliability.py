@@ -891,7 +891,9 @@ def test_the_minimum_snippet_length_ignores_spaces_and_ellipses():
 def test_a_page_number_shared_by_two_documents_is_resolved_by_file_name():
     pages = [
         _page("Asking Price: $10,000,000", file_name="om.pdf"),
-        _page("Asking Price: $9,000,000", file_name="teaser.pdf"),
+        # A differently labelled figure: the same label with a different
+        # value would be a conflict (Milestone 1.2, see test_field_conflicts.py).
+        _page("Offering Price: $9,000,000", file_name="teaser.pdf"),
     ]
 
     resolved = _enforce(

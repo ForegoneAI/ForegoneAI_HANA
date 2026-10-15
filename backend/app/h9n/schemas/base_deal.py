@@ -40,8 +40,10 @@ class FieldEvidence(BaseModel):
 
 
 # Why an extracted value was kept out of its field (Milestone 1.1). The first
-# five mean the model's citation didn't hold up; the last three mean the model
-# itself said the value shouldn't be taken at face value.
+# five mean the model's citation didn't hold up; the next three mean the model
+# itself said the value shouldn't be taken at face value. The last
+# (Milestone 1.2) means H9N's own checks found the document stating a
+# different value for the field elsewhere - see WithheldValue.conflicting_values.
 WithheldReason = Literal[
     "no_evidence",
     "page_not_in_document",
@@ -51,7 +53,24 @@ WithheldReason = Literal[
     "model_uncertain",
     "model_conflicting",
     "model_listed_as_missing",
+    "conflicting_evidence",
 ]
+
+
+# One value the source document states for a field whose passages disagree
+# (Milestone 1.2), with the verified passage that states it. A conflict keeps
+# one of these for every passage found - the extracted value's and each
+# disagreeing one - so a reviewer sees both sides instead of whichever value
+# the model happened to pick.
+class ConflictingValue(BaseModel):
+
+    # The value as this passage states it, normalized like the field itself
+    # (e.g. "$9.5M" -> 9500000, "6.25%" -> 6.25).
+    value: Union[int, float, str]
+
+    # Where the document states it. Always a verified citation: the quoted
+    # passage is on the cited page and contains `value`.
+    evidence: FieldEvidence
 
 
 # A value the extractor proposed but could not verify, held back for a human
@@ -79,6 +98,60 @@ class WithheldValue(BaseModel):
     # The citation the model gave, if any, so the reviewer can jump straight
     # to where it claimed the value came from.
     evidence: Optional[FieldEvidence] = None
+
+    # Every passage found for a field whose source passages disagree
+    # (reason "conflicting_evidence", or "model_conflicting" when the
+    # disagreeing passages could be verified) - the proposed value's own
+    # passage included - so both sides are preserved for review (Milestone
+    # 1.2). Empty for every other reason.
+    conflicting_values: list[ConflictingValue] = Field(default_factory=list)
+
+
+# A value that WAS stored, but whose label appears elsewhere in the document
+# followed by a different figure (Milestone 1.2) - e.g. "NOI: $1,200,000"
+# in the in-place financials and "NOI: $1,500,000" under Pro Forma, or a
+# senior and a mezzanine "Loan Amount". That is often two different things
+# sharing a label rather than a contradiction, so the value is kept, but the
+# field needs a reviewer to confirm which figure it should hold.
+#
+# Its `detail` is also added to uncertain_information as a note, which is
+# what the review form shows, and always starts with POSSIBLE_CONFLICT_PREFIX.
+# The flag is open while that note is there: a reviewer dismisses it by
+# removing the note (field_status.dismiss_possible_conflict), and the entry
+# stays as the record of the passages found.
+POSSIBLE_CONFLICT_PREFIX = "The same label gives a different figure elsewhere in the document"
+
+
+class PossibleConflict(BaseModel):
+
+    field_name: str
+
+    # Plain-language explanation for the reviewer.
+    detail: str
+
+    # The stored value's own passage first, then each passage giving another
+    # figure after the same label. Every one is a verified citation.
+    conflicting_values: list[ConflictingValue] = Field(default_factory=list)
+
+
+# Profile fields that describe the extraction or its review rather than the
+# deal. Every other field of a deal profile is a deal value: the model is asked
+# to extract it (extraction_output.VALUE_FIELDS) and it gets a trust status
+# (field_status.py). Add a new bookkeeping field here, or it will be treated
+# as a deal value.
+BOOKKEEPING_FIELDS = frozenset(
+    {
+        "missing_information",
+        "conflicting_information",
+        "uncertain_information",
+        "evidence",
+        "withheld_values",
+        "possible_conflicts",
+        "corrected_fields",
+        "review_feedback",
+        "review_status",
+    }
+)
 
 
 # Contains fields shared by both PE and REPE deals
@@ -115,6 +188,11 @@ class BaseDeal(BaseModel):
     # knows which values are worth double-checking first
     # (Milestone 1, item 3 - Uncertainty Flagging).
     uncertain_information: list[str] = Field(default_factory=list)
+
+    # Stored values whose label gives a different figure elsewhere in the
+    # document, kept but flagged for a reviewer (Milestone 1.2). See
+    # PossibleConflict.
+    possible_conflicts: list[PossibleConflict] = Field(default_factory=list)
 
     # Values the extractor proposed but could not verify against the source
     # document, or that it flagged as uncertain or conflicting. Their fields
