@@ -23,5 +23,12 @@ data/
 uploads/
 deal_packages/
 
+# Evaluation: real deal packages (private) and generated run reports
+backend/evaluation/benchmark_data/
+backend/evaluation/reports/
+
+# pytest
+.pytest_cache/
+
 # Logs
 *.log

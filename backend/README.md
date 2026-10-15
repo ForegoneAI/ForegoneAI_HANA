@@ -494,6 +494,39 @@ Things that aren't obvious:
   (`_caller_has_access` in `app/h9n/screening/api.py`), and
   switching it to the signed-in user's organizations is part of the M2.5 work, not a separate task.
 
+### Screening rules (Milestone 3.2)
+
+`app/h9n/screening/rules.py` checks every hard mandate criterion against a Deal Profile in plain
+Python - no LLM decides a known criterion. `screen_deal(mandate, profile)` (or
+`screen_criteria(criteria, profile)` for unsaved criteria) returns one result per criterion that is
+set, plus an overall `outcome` and the mandate `id`/`version` used:
+
+```python
+from backend.app.h9n.screening.rules import screen_deal
+result = screen_deal(mandate, profile)   # profile: REPEDealProfile or its dict
+result.outcome                            # "fail" if any rule fails, else "unknown" if any is, else "pass"
+result.results[0]                         # e.g. rule="key_metrics.cap_rate", status="fail",
+                                          # actual_value=4.9, required_value={"min": 5.5, "max": None},
+                                          # profile_field="cap_rate", evidence=[...], detail="..."
+```
+
+Things that aren't obvious:
+
+- **"unknown" means a reviewer must look, never a guess.** A rule is unknown when its field is
+  null, not a finite number, a property type that isn't recognized, or a market that can't be
+  found or only partly matches ("Uptown Dallas"). A value held back in `withheld_values` is attached
+  to the result (`withheld`) but never compared - 7.0 waiting for review doesn't pass "min 5.5".
+- **Bounds are inclusive**, and a value within float rounding of a bound meets it.
+- **`required_value` shapes:** `{"one_of": [...]}` (asset types, target markets),
+  `{"none_of": [...]}` (excluded markets), `{"min": x, "max": y}` (deal size, key metrics),
+  `{"max": x}` (leverage).
+- **Markets** are read from `market`, else `submarket`, `location`, `address`; `profile_field`
+  says which one was used.
+- **`human_corrected`** marks a field a reviewer changed. Corrections don't update `evidence`, so
+  its citation may still show the originally extracted value.
+- **Unapproved profiles aren't refused.** `profile_review_status` is recorded; whether screening a
+  pending profile is allowed is the caller's decision. Preferences never become rules.
+
 ## Settings
 
 | Env var | Required? | Default | What it's for |
