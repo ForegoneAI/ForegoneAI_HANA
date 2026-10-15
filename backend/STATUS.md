@@ -50,10 +50,10 @@ the [README](./README.md).
 **Milestone 1.2 (2026-10-15):** every value field now also has one structured status -
 `supported`, `uncertain`, `missing` or `conflicting` - with a `needs_review` flag and reason codes,
 in `field_statuses` on every profile the API returns, so a UI doesn't have to parse the notes
-above. H9N also detects obvious conflicts itself (the same label with a different value elsewhere
-in the document, or a second cited passage that disagrees) and keeps every passage for the
-reviewer. Statuses are also saved per extraction run (`extraction_field_statuses`). See "Field
-status" in the [README](./README.md).
+above. H9N also detects conflicts itself and keeps every passage for the reviewer: cited passages
+that disagree withhold the value; the same label with a different figure elsewhere (often in-place
+vs pro forma, or two loans) keeps the value but flags it. Statuses are also saved per extraction
+run (`extraction_field_statuses`). See "Field status" in the [README](./README.md).
 
 ## 4. Human Review and Correction — ✅ Done
 

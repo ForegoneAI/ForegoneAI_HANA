@@ -12,10 +12,14 @@ Every deal value field gets exactly one status:
 - "uncertain"   - a value was found but shouldn't be relied on yet: the model
                   doubted it, its citation didn't check out, it only has a
                   "quote_only" citation (narrative fields the model
-                  summarizes), or it has no citation at all.
-- "conflicting" - the document gives different values for the field. The
-                  field is left null and every passage is kept in the
-                  withheld entry's `conflicting_values`.
+                  summarizes), it has no citation at all, or its label gives
+                  a different figure elsewhere in the document (a possible
+                  conflict, e.g. in-place vs pro forma NOI - the value is
+                  kept, the other passages are in `conflicting_values`).
+- "conflicting" - passages the extraction cited for the field disagree, or
+                  the model said so. The field is left null and every
+                  passage is kept in the withheld entry's
+                  `conflicting_values`.
 - "missing"     - no value, and nothing proposed for it.
 
 The status is derived from what the profile already records (the field's
@@ -27,9 +31,11 @@ exposed as `REPEDealProfile.field_statuses`, which every API response that
 returns a profile includes.
 
 A field a reviewer has corrected is trusted as the reviewer left it: it is
-"supported" (or "missing" if they cleared it) and never needs review, even if
-an extractor note about it remains. That mirrors the review form (M2.2),
-where "corrected" outranks every extractor flag.
+"supported" (or "missing" if they cleared it) and doesn't need review, even
+if an extractor note about it remains. That mirrors the review form (M2.2),
+where "corrected" outranks every extractor flag. The exception is a newer
+proposal for the field waiting in `withheld_values` (e.g. from re-deriving it
+after reviewer feedback): that needs a reviewer again.
 """
 
 from __future__ import annotations
@@ -38,7 +44,13 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from backend.app.h9n.schemas.base_deal import ConflictingValue, FieldEvidence, WithheldValue
+from backend.app.h9n.schemas.base_deal import (
+    BOOKKEEPING_FIELDS,
+    ConflictingValue,
+    FieldEvidence,
+    PossibleConflict,
+    WithheldValue,
+)
 
 if TYPE_CHECKING:
     from backend.app.h9n.schemas.base_deal import BaseDeal
@@ -51,6 +63,7 @@ FieldStatusReasonCode = Literal[
     "reviewer_corrected",  # a reviewer set this value (or cleared it)
     "verified_citation",  # the quoted passage contains the value
     "conflicting_values",  # passages in the document disagree
+    "same_label_different_value",  # the label gives another figure elsewhere
     "model_flagged_conflicting",  # the model said the document disagrees
     "model_flagged_uncertain",  # the model doubted the value
     "unverified_value",  # proposed, but its citation didn't check out
@@ -60,20 +73,9 @@ FieldStatusReasonCode = Literal[
     "not_stated",  # no value and no note
 ]
 
-# Profile fields that describe the extraction or its review rather than the
-# deal. Every other model field is a deal value and gets a status.
-BOOKKEEPING_FIELDS = frozenset(
-    {
-        "missing_information",
-        "conflicting_information",
-        "uncertain_information",
-        "evidence",
-        "withheld_values",
-        "corrected_fields",
-        "review_feedback",
-        "review_status",
-    }
-)
+# Every field not in base_deal.BOOKKEEPING_FIELDS is a deal value and gets a
+# status. Re-exported here for callers that read statuses.
+__all__ = ["BOOKKEEPING_FIELDS", "FieldStatus", "FieldStatusReport", "assess_field", "assess_fields"]
 
 _CONFLICT_REASONS = {"model_conflicting", "conflicting_evidence"}
 
@@ -100,8 +102,8 @@ class FieldStatusReport(BaseModel):
     # The value waiting in withheld_values for a reviewer, if any.
     proposed_value: Optional[Any] = None
 
-    # For a conflict: every passage found and the value it states. Several
-    # passages can state the same value.
+    # For a conflict or possible conflict: every passage found and the value
+    # it states. Several passages can state the same value.
     conflicting_values: list[ConflictingValue] = Field(default_factory=list)
 
     # Every citation H9N holds for the field - the stored value's, the
@@ -162,43 +164,60 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
     withheld: Optional[WithheldValue] = next(
         (entry for entry in profile.withheld_values if entry.field_name == field_name), None
     )
-    conflicting_values = list(withheld.conflicting_values) if withheld else []
+    possible: Optional[PossibleConflict] = next(
+        (entry for entry in profile.possible_conflicts if entry.field_name == field_name), None
+    )
+    conflicting_values = (list(withheld.conflicting_values) if withheld else []) or (
+        list(possible.conflicting_values) if possible else []
+    )
     evidence = _dedupe(
         stored
         + ([withheld.evidence] if withheld and withheld.evidence else [])
         + [candidate.evidence for candidate in conflicting_values]
     )
+    corrected = field_name in profile.corrected_fields
 
     def notes(source: list[str]) -> list[str]:
         return [note_text(note, field_name) for note in source if note_names_field(note, field_name)]
-
-    conflict_notes = notes(profile.conflicting_information)
-    uncertain_notes = notes(profile.uncertain_information)
-    missing_notes = notes(profile.missing_information)
 
     def report(status: FieldStatus, reasons: list[FieldStatusReason], **extra: Any) -> FieldStatusReport:
         return FieldStatusReport(
             status=status,
             needs_review=status != "supported",
+            reviewer_corrected=corrected,
             reasons=reasons,
             proposed_value=withheld.proposed_value if withheld else None,
+            conflicting_values=conflicting_values,
             evidence=evidence,
             **extra,
         )
 
-    if field_name in profile.corrected_fields:
-        return FieldStatusReport(
-            status="supported" if has_value else "missing",
-            needs_review=False,
-            reviewer_corrected=True,
-            reasons=[
-                FieldStatusReason(
-                    code="reviewer_corrected",
-                    message="Set by a reviewer." if has_value else "Cleared by a reviewer.",
-                )
-            ],
-            evidence=evidence,
-        )
+    if corrected:
+        if withheld is None:
+            # The reviewer's value (or blank) stands, whatever the extractor said.
+            return FieldStatusReport(
+                status="supported" if has_value else "missing",
+                needs_review=False,
+                reviewer_corrected=True,
+                reasons=[
+                    FieldStatusReason(
+                        code="reviewer_corrected",
+                        message="Set by a reviewer." if has_value else "Cleared by a reviewer.",
+                    )
+                ],
+                evidence=evidence,
+            )
+        # A newer proposal is waiting (e.g. re-derived after reviewer
+        # feedback): the reviewer has to accept or dismiss it. Extractor notes
+        # from before the correction no longer apply.
+        conflict_notes: list[str] = []
+        uncertain_notes: list[str] = []
+        missing_notes: list[str] = []
+        possible = None
+    else:
+        conflict_notes = notes(profile.conflicting_information)
+        uncertain_notes = notes(profile.uncertain_information)
+        missing_notes = notes(profile.missing_information)
 
     if (withheld and withheld.reason in _CONFLICT_REASONS) or conflict_notes:
         reasons = []
@@ -211,18 +230,32 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
             for note in conflict_notes
             if not any(note in reason.message for reason in reasons)
         ]
-        return report("conflicting", reasons, conflicting_values=conflicting_values)
+        return report("conflicting", reasons)
 
-    reasons = [FieldStatusReason(code="model_flagged_uncertain", message=note) for note in uncertain_notes]
+    reasons = []
+    if possible is not None:
+        reasons.append(FieldStatusReason(code="same_label_different_value", message=possible.detail))
+    reasons += [
+        FieldStatusReason(code="model_flagged_uncertain", message=note)
+        for note in uncertain_notes
+        if not (possible and note in possible.detail)
+    ]
     if withheld:
         if withheld.reason == "model_uncertain":
-            if not reasons:
+            if not any(reason.code == "model_flagged_uncertain" for reason in reasons):
                 reasons.append(FieldStatusReason(code="model_flagged_uncertain", message=withheld.detail))
         elif withheld.reason == "model_listed_as_missing":
             reasons.append(FieldStatusReason(code="listed_as_missing", message=withheld.detail))
         else:
             reasons.append(FieldStatusReason(code="unverified_value", message=withheld.detail))
-    if has_value:
+    if corrected:
+        reasons.append(
+            FieldStatusReason(
+                code="reviewer_corrected",
+                message="The current value was set by a reviewer; a newer proposal is waiting for review.",
+            )
+        )
+    elif has_value:
         verified = next((entry for entry in stored if entry.verification == "value_matched"), None)
         if not stored:
             reasons.append(FieldStatusReason(code="no_citation", message="The value has no citation."))
@@ -236,7 +269,9 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
                     )
                 )
             else:
-                reasons.append(FieldStatusReason(code="no_citation", message="The value's citation wasn't verified."))
+                reasons.append(
+                    FieldStatusReason(code="unverified_value", message="The value's citation wasn't verified.")
+                )
     if reasons:
         return report("uncertain", reasons)
 

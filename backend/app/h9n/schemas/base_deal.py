@@ -107,6 +107,44 @@ class WithheldValue(BaseModel):
     conflicting_values: list[ConflictingValue] = Field(default_factory=list)
 
 
+# A value that WAS stored, but whose label appears elsewhere in the document
+# followed by a different figure (Milestone 1.2) - e.g. "NOI: $1,200,000"
+# in the in-place financials and "NOI: $1,500,000" under Pro Forma, or a
+# senior and a mezzanine "Loan Amount". That is often two different things
+# sharing a label rather than a contradiction, so the value is kept, but the
+# field needs a reviewer to confirm which figure it should hold.
+class PossibleConflict(BaseModel):
+
+    field_name: str
+
+    # Plain-language explanation for the reviewer.
+    detail: str
+
+    # The stored value's own passage first, then each passage giving another
+    # figure after the same label. Every one is a verified citation.
+    conflicting_values: list[ConflictingValue] = Field(default_factory=list)
+
+
+# Profile fields that describe the extraction or its review rather than the
+# deal. Every other field of a deal profile is a deal value: the model is asked
+# to extract it (extraction_output.VALUE_FIELDS) and it gets a trust status
+# (field_status.py). Add a new bookkeeping field here, or it will be treated
+# as a deal value.
+BOOKKEEPING_FIELDS = frozenset(
+    {
+        "missing_information",
+        "conflicting_information",
+        "uncertain_information",
+        "evidence",
+        "withheld_values",
+        "possible_conflicts",
+        "corrected_fields",
+        "review_feedback",
+        "review_status",
+    }
+)
+
+
 # Contains fields shared by both PE and REPE deals
 class BaseDeal(BaseModel):
 
@@ -141,6 +179,11 @@ class BaseDeal(BaseModel):
     # knows which values are worth double-checking first
     # (Milestone 1, item 3 - Uncertainty Flagging).
     uncertain_information: list[str] = Field(default_factory=list)
+
+    # Stored values whose label gives a different figure elsewhere in the
+    # document, kept but flagged for a reviewer (Milestone 1.2). See
+    # PossibleConflict.
+    possible_conflicts: list[PossibleConflict] = Field(default_factory=list)
 
     # Values the extractor proposed but could not verify against the source
     # document, or that it flagged as uncertain or conflicting. Their fields

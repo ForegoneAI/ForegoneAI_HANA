@@ -7,7 +7,8 @@
 -- extraction_evidence stores citations, so the team can query which fields
 -- needed a human (and how that changes between prompt or model versions)
 -- without unpacking every profile snapshot. Conflicting passages themselves
--- stay in the profile snapshot, under withheld_values[].conflicting_values.
+-- stay in the profile snapshot, under withheld_values[].conflicting_values
+-- and possible_conflicts[].conflicting_values.
 --
 -- These rows are a record of the extraction, like the run they belong to:
 -- append-only, never updated when a reviewer later corrects the deal. A
@@ -22,7 +23,7 @@ create table if not exists public.extraction_field_statuses (
     needs_review boolean not null,
     -- FieldStatusReason codes, most specific first, e.g. {conflicting_values}.
     reason_codes text[] not null default '{}',
-    -- How many passages a conflict found (0 unless status = 'conflicting').
+    -- How many passages a conflict or possible conflict found (0 otherwise).
     conflicting_passage_count integer not null default 0 check (conflicting_passage_count >= 0),
     created_at timestamptz not null default now(),
     unique (run_id, field_name),

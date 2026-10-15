@@ -176,8 +176,8 @@ UI or script can tell what to trust without reading the notes:
 | `status` | Meaning | `needs_review` |
 |---|---|---|
 | `supported` | A value whose quoted passage contains it, or one a reviewer set | no |
-| `uncertain` | A value was found but shouldn't be relied on yet: Claude doubted it, its citation didn't check out (it's in `withheld_values`), it has no citation, or it's a summarized narrative field (`business_plan`, `investment_strategy`) whose quote can't be matched word for word | yes |
-| `conflicting` | The document gives different values for the field | yes |
+| `uncertain` | A value was found but shouldn't be relied on yet: Claude doubted it, its citation didn't check out (it's in `withheld_values`), it has no citation, it's a summarized narrative field (`business_plan`, `investment_strategy`) whose quote can't be matched word for word, or its label gives a different figure elsewhere in the document (a *possible* conflict - the value is kept) | yes |
+| `conflicting` | Passages cited for the field give different values, or Claude said the document disagrees. The field is left `null` | yes |
 | `missing` | No value and nothing proposed | yes |
 
 ```json
@@ -197,8 +197,9 @@ UI or script can tell what to trust without reading the notes:
 ```
 
 `reasons[].code` is stable (`verified_citation`, `reviewer_corrected`, `conflicting_values`,
-`model_flagged_conflicting`, `model_flagged_uncertain`, `unverified_value`, `quote_only_citation`,
-`no_citation`, `listed_as_missing`, `not_stated`) so a UI can word it however it likes.
+`same_label_different_value`, `model_flagged_conflicting`, `model_flagged_uncertain`,
+`unverified_value`, `quote_only_citation`, `no_citation`, `listed_as_missing`, `not_stated`) so a UI
+can word it however it likes.
 
 Some non-obvious behavior:
 
@@ -208,18 +209,30 @@ Some non-obvious behavior:
   `PATCH`, and a copy sent back in is ignored. It isn't shown to Claude in the feedback prompt.
 - **A reviewer's correction wins.** A field in `corrected_fields` is `supported` (or `missing` if
   the reviewer cleared it) with `needs_review: false`, even if an extractor note about it remains -
-  the same precedence the review form uses.
-- **H9N detects obvious conflicts itself** (`extraction_output._conflicting_passages`), on top of
-  Claude's own `conflicting` flag. A value is withheld with reason `conflicting_evidence` when
-  another passage Claude cited for the field verifies with a different value, or - for numeric
-  fields - when the label in front of the value's citation ("Asking Price:") starts another line
-  or sentence directly followed by a different figure of the same kind. To avoid withholding
-  correct values, a generic label ("Total:", "Price:"), a longer label that merely contains this
-  one ("Pro Forma Asking Price"), a line with several figures after the label (a row of years or a
-  range), and a bare number followed by a word ("4 offers") are all ignored, and every passage
-  kept must pass the same evidence check as a citation. Every passage found - both sides - is kept
-  in the withheld entry's `conflicting_values`, and a `conflicting_information` note is added in
-  the usual `field: ...` form. Text fields are only treated as conflicting when Claude flags them.
+  the same precedence the review form uses. The exception is a newer proposal for the field waiting
+  in `withheld_values` (e.g. re-derived after reviewer feedback): it needs review again until it is
+  accepted or dismissed.
+- **H9N detects conflicts itself** ("Conflict detection" in `extraction_output.py`), on top of
+  Claude's own `conflicting` flag, in two strengths:
+  - **Conflicting citations - withheld.** When another passage Claude cited for the same field
+    verifies with a different value, Claude itself tied both passages to the field, so the value
+    is withheld with reason `conflicting_evidence`. Every passage is kept in the withheld entry's
+    `conflicting_values`, and a `conflicting_information` note is added in the usual `field: ...`
+    form.
+  - **Same label, different figure - kept, flagged.** When the label in front of a stored numeric
+    value's citation ("NOI:") starts another line or sentence directly followed by a different
+    figure ("NOI: $1,500,000"), it is often another section's figure - in-place vs pro forma, a
+    senior vs a mezzanine loan - not a contradiction. The value is **kept**; a `possible_conflicts`
+    entry holds every passage, an `uncertain_information` note is added, and the field reads
+    `uncertain` until a reviewer confirms it.
+
+  To keep the label check quiet, a generic label ("Total:", "Price:"), a longer label that merely
+  contains this one ("Pro Forma Asking Price"), a line with several figures after the label (a row
+  of years or a range) and a bare number followed by a word ("4 offers") are ignored, and every
+  passage kept must pass the same evidence check as a citation. At most 10 passages are kept per
+  field, always including every disagreeing one. The document is split and normalized once, and
+  only lines containing the label are parsed for numbers (about 0.15 s for a 300-page package).
+  Text fields are only treated as conflicting when Claude flags them.
 - **Saved per run.** `record_extraction_run` also writes one `extraction_field_statuses` row per
   field (status, `needs_review`, reason codes, conflicting passage count) - see
   `supabase/migrations/20261016_add_h9n_extraction_field_statuses.sql`. Those rows record the

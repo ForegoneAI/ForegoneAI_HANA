@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.h9n.extraction.extraction_output import VALUE_FIELDS, REPEExtractionOutput, enforce_integrity
-from backend.app.h9n.schemas.base_deal import ConflictingValue, FieldEvidence, WithheldValue
+from backend.app.h9n.schemas.base_deal import ConflictingValue, FieldEvidence, PossibleConflict, WithheldValue
 from backend.app.h9n.schemas.field_status import (
     BOOKKEEPING_FIELDS,
     assess_field,
@@ -101,7 +101,7 @@ def test_a_field_with_no_value_is_missing():
         # A value with no citation at all (e.g. saved before Milestone 1.1).
         (REPEDealProfile(noi=650_000), "no_citation"),
         # A value whose citation was never verified.
-        (REPEDealProfile(noi=650_000, evidence=[_cite("noi", 650_000, verification=None)]), "no_citation"),
+        (REPEDealProfile(noi=650_000, evidence=[_cite("noi", 650_000, verification=None)]), "unverified_value"),
     ],
 )
 def test_values_that_shouldnt_be_relied_on_yet_are_uncertain(deal, code):
@@ -203,9 +203,7 @@ def test_a_reviewer_corrected_value_is_trusted_whatever_the_extractor_said():
         noi=700_000,
         corrected_fields=["noi"],
         conflicting_information=["noi: $650k on p.2, $700k on p.9"],
-        withheld_values=[
-            WithheldValue(field_name="noi", proposed_value=650_000, reason="model_conflicting", detail="x")
-        ],
+        uncertain_information=["noi: approximate"],
     )
 
     report = _status(deal, "noi")
@@ -214,6 +212,56 @@ def test_a_reviewer_corrected_value_is_trusted_whatever_the_extractor_said():
     assert report.needs_review is False
     assert report.reviewer_corrected is True
     assert [r.code for r in report.reasons] == ["reviewer_corrected"]
+
+
+def test_a_newer_proposal_for_a_corrected_field_needs_review_again():
+    # E.g. the extractor re-derived the field after reviewer feedback but
+    # couldn't verify the new value: it waits in withheld_values.
+    deal = REPEDealProfile(
+        noi=700_000,
+        corrected_fields=["noi"],
+        conflicting_information=["noi: $650k on p.2, $700k on p.9"],
+        withheld_values=[
+            WithheldValue(field_name="noi", proposed_value=650_000, reason="snippet_not_on_page", detail="Not found.")
+        ],
+    )
+
+    report = _status(deal, "noi")
+
+    assert (report.status, report.needs_review, report.reviewer_corrected) == ("uncertain", True, True)
+    assert report.proposed_value == 650_000
+    # Notes from before the correction no longer count; the proposal does.
+    assert [r.code for r in report.reasons] == ["unverified_value", "reviewer_corrected"]
+
+    # Accepting or dismissing it (the review form drops the entry) settles it.
+    deal.withheld_values = []
+    assert _status(deal, "noi").needs_review is False
+
+
+def test_a_possible_conflict_flags_a_stored_value_as_uncertain():
+    passages = [
+        ConflictingValue(value=1_200_000, evidence=_cite("noi", 1_200_000)),
+        ConflictingValue(value=1_500_000, evidence=_cite("noi", 1_500_000, page_number=7)),
+    ]
+    detail = "The same label gives a different figure elsewhere in the document: ..."
+    deal = REPEDealProfile(
+        noi=1_200_000,
+        evidence=[_cite("noi", 1_200_000)],
+        uncertain_information=[f"noi: {detail}"],
+        possible_conflicts=[PossibleConflict(field_name="noi", detail=detail, conflicting_values=passages)],
+    )
+
+    report = _status(deal, "noi")
+
+    assert (report.status, report.needs_review) == ("uncertain", True)
+    # One reason, not the same text again from its note.
+    assert [r.code for r in report.reasons] == ["same_label_different_value"]
+    assert report.conflicting_values == passages
+    assert [e.page_number for e in report.evidence] == [1, 7]
+
+    # A reviewer confirming the value settles it.
+    deal.corrected_fields.append("noi")
+    assert _status(deal, "noi").needs_review is False
 
 
 def test_a_field_a_reviewer_cleared_is_missing_but_needs_no_review():
@@ -372,3 +420,17 @@ def test_the_feedback_prompt_shows_the_profile_without_statuses():
     prompt = client.messages.create.call_args.kwargs["messages"][0]["content"]
     assert '"asking_price": 1000000.0' in prompt
     assert "field_statuses" not in prompt
+
+
+def test_bookkeeping_fields_are_defined_once_and_never_extracted():
+    from backend.app.h9n.extraction import extraction_output
+    from backend.app.h9n.schemas import base_deal
+
+    # field_status, the extractor and the profile all use the one list in
+    # base_deal, so a bookkeeping field added there can't get a status or be
+    # asked of the model by mistake.
+    assert BOOKKEEPING_FIELDS is base_deal.BOOKKEEPING_FIELDS
+    assert set(VALUE_FIELDS) == set(REPEDealProfile.model_fields) - BOOKKEEPING_FIELDS
+    assert extraction_output.NON_EXTRACTABLE_FIELDS == BOOKKEEPING_FIELDS - extraction_output._META_FIELDS
+    assert "possible_conflicts" in extraction_output.NON_EXTRACTABLE_FIELDS
+    assert BOOKKEEPING_FIELDS <= set(REPEDealProfile.model_fields)
