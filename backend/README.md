@@ -88,7 +88,9 @@ When PDF text lists a table's labels first and then its values (`Asking Price:` 
 the i-th label goes with the i-th value. That pairing is only trusted when two or more `Label:`
 lines are followed by exactly as many lines that each hold a figure, and then by another `Label:`
 line or the end of the page; a blank cell, a wrapped value, or a text value breaks the pattern and
-the quote is withheld.
+the quote is withheld. A numeric quote may not run from two or more `Label:` lines in a row onto
+the lines below them, with or without "...": there, the line after the last label holds the first
+label's figure (`Units:` / `1965` in `Year Built:` / `Units:` / `1965` / `4`).
 
 **How the value is matched to the quote:**
 - **Numbers** are read from the page itself, with their context: sign (`-$150,000`,

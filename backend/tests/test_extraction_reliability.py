@@ -814,6 +814,28 @@ def test_a_row_of_a_column_layout_table_is_verified_as_it_reads():
     [
         pytest.param("units", 1965, "No. of Units: 1965", COLUMN_TABLE_PAGE, id="another row's figure"),
         pytest.param("units", 1965, "No. of Units: ... 1965", COLUMN_TABLE_PAGE, id="ellipsis across rows"),
+        # On the page as written, the last label of a column runs straight
+        # into the first figure, which belongs to the first label.
+        pytest.param("units", 1965, "Units: 1965", "Year Built:\nUnits:\n1965\n4", id="last label, first figure"),
+        pytest.param(
+            "units", 1965, "Units: ... 1965", "Year Built:\nUnits:\n1965\n4", id="ellipsis, last label to first figure"
+        ),
+        pytest.param(
+            "units",
+            1965,
+            "Units: ... 1965",
+            "Year Built:\nUnits:\nParking:\n1965\n4\n20",
+            id="ellipsis over the labels below",
+        ),
+        # The cost: a heading ending in ":" over a label can't be told apart
+        # from a column of two labels with a blank cell, so this is withheld.
+        pytest.param(
+            "asking_price",
+            2_100_000,
+            "Asking Price: $2,100,000",
+            "Pricing:\nAsking Price:\n$2,100,000",
+            id="label under a heading ending in a colon",
+        ),
         # Each page below has a blank or wrapped cell, so pairing the i-th
         # label with the i-th line after the labels would give the quoted,
         # wrong pair.
@@ -852,6 +874,28 @@ def test_a_column_layout_table_that_could_be_misaligned_is_withheld(field_name, 
 
     assert getattr(deal, field_name) is None
     assert deal.withheld_values[0].reason == "snippet_not_on_page"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "snippet", "page_text"),
+    [
+        pytest.param(
+            "asking_price", 2_100_000, "Asking Price: ... $2,100,000", COLUMN_TABLE_PAGE, id="first row, ellipsis"
+        ),
+        pytest.param("year_built", 1965, "Year Built: ... 1965", COLUMN_TABLE_PAGE, id="last row, ellipsis"),
+        pytest.param(
+            "units",
+            4,
+            "No. of Units: 4",
+            "Asking Price:\n$2,100,000\nNo. of Units:\n4\nYear Built:\n1965",
+            id="label and value lines alternate",
+        ),
+    ],
+)
+def test_a_table_row_split_across_lines_is_verified(field_name, value, snippet, page_text):
+    deal = _one(field_name, value, snippet, page_text)
+
+    assert getattr(deal, field_name) == value, deal.withheld_values
 
 
 @pytest.mark.parametrize(

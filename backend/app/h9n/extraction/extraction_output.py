@@ -356,10 +356,14 @@ def _part_pattern(part: str) -> str:
     return pattern
 
 
-def _locate(parts: list[str], page: str, gap_allowed: Callable[[str], bool]) -> Optional[list[tuple[int, int]]]:
+def _locate(
+    parts: list[str], page: str, gap_allowed: Callable[[str], bool], barriers: list[int]
+) -> Optional[list[tuple[int, int]]]:
     """Where each quoted piece sits on the (normalized) page, in order, with
-    every gap no longer than MAX_ELLIPSIS_GAP_CHARS and passing `gap_allowed`.
-    Returns the matched spans, or None if the quote isn't on the page."""
+    every gap no longer than MAX_ELLIPSIS_GAP_CHARS and passing `gap_allowed`,
+    and no piece or gap running across one of the `barriers` (positions on
+    the page). Returns the matched spans, or None if the quote isn't on the
+    page."""
     patterns = [re.compile(_part_pattern(part)) for part in parts]
 
     def search(index: int, start: int) -> Optional[list[tuple[int, int]]]:
@@ -372,6 +376,9 @@ def _locate(parts: list[str], page: str, gap_allowed: Callable[[str], bool]) -> 
                     break
                 if not gap_allowed(gap):
                     continue
+            begin = start if index > 0 else match.start()
+            if any(begin <= barrier < match.end() for barrier in barriers):
+                continue
             rest = search(index + 1, match.end())
             if rest is not None:
                 return [match.span(), *rest]
@@ -414,25 +421,47 @@ def _paired_columns(page: str) -> str:
     return "\n".join(paired)
 
 
+def _label_column_breaks(page: str) -> list[int]:
+    """The line breaks after each line ending in ":" that sits next to
+    another such line (on a normalized page). Two or more labels in a row
+    read as a column whose figures come after it, so the line after one of
+    them can't be taken as its value: the last label runs straight into the
+    first label's figure ("year built:\\nunits:\\n1965\\n4")."""
+    lines = page.split("\n")
+    breaks = []
+    position = 0
+    for i, line in enumerate(lines[:-1]):
+        position += len(line)
+        if line.endswith(":") and ((i > 0 and lines[i - 1].endswith(":")) or lines[i + 1].endswith(":")):
+            breaks.append(position)
+        position += 1
+    return breaks
+
+
 def _find_quote(
     snippet: str, page_text: str, *, numeric: bool = False
 ) -> Optional[tuple[str, list[tuple[int, int]]]]:
     """The normalized page the quote was found on and its spans there, or None.
-    For a numeric field a "..." gap may not skip over another number - that's
-    how a label gets paired with the wrong figure. Only if the quote isn't on
-    the page as written is it looked for with column-layout tables put back
-    into rows (see _paired_columns)."""
+    For a numeric field a "..." gap may not skip over another number, and the
+    quote may not run from a column of labels onto the lines below it (see
+    _label_column_breaks) - that's how a label gets paired with the wrong
+    figure. Only if the quote isn't on the page as written is it looked for
+    with column-layout tables put back into rows (see _paired_columns)."""
     parts = _quote_parts(snippet)
     if not parts:
         return None
     gap_allowed = (lambda gap: not any(char.isdigit() for char in gap)) if numeric else (lambda gap: True)
+
+    def locate(page: str) -> Optional[list[tuple[int, int]]]:
+        return _locate(parts, page, gap_allowed, _label_column_breaks(page) if numeric else [])
+
     for join_line_hyphens in (False, True):
         page = _normalize(page_text, join_line_hyphens=join_line_hyphens)
-        spans = _locate(parts, page, gap_allowed)
+        spans = locate(page)
         if spans is not None:
             return page, spans
     page = _paired_columns(page)
-    spans = _locate(parts, page, gap_allowed)
+    spans = locate(page)
     if spans is not None:
         return page, spans
     return None
