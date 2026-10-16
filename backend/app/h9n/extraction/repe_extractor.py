@@ -708,9 +708,8 @@ def apply_reviewer_feedback(
             "Here is the original deal package text, split by page:\n\n"
             f"{document_text}\n\n"
             "Here is the REPEDealProfile as currently extracted (as JSON):\n\n"
-            # field_statuses is H9N's own reading of the profile (Milestone
-            # 1.2), derived from the fields shown here; leaving it out keeps
-            # the model looking at the extracted values, not at our verdicts.
+            # Without field_statuses (Milestone 1.2): the model should look at
+            # the extracted values, not at H9N's verdicts on them.
             f"{json.dumps(deal.model_dump(exclude={'field_statuses'}), indent=2)}\n\n"
             f"Here is the reviewer's explanation of what's wrong with it:\n\n{feedback}"
         ),

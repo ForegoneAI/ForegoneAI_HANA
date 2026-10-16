@@ -1,41 +1,19 @@
 """
 field_status.py
 
-H9N Milestone 1.2 - one trust status per extracted field, so a UI or API
-caller can tell a value it can rely on from one a human needs to look at
-without reading the profile's free-text notes.
+H9N Milestone 1.2 - one trust status per extracted deal field, so a UI or API
+caller can tell a value it can rely on from one a human needs to check:
 
-Every deal value field gets exactly one status:
-
-- "supported"   - a value backed by a verified citation whose quoted passage
-                  contains it, or a value a reviewer set or confirmed.
-- "uncertain"   - a value was found but shouldn't be relied on yet: the model
-                  doubted it, its citation didn't check out, it only has a
-                  "quote_only" citation (narrative fields the model
-                  summarizes), it has no citation at all, or its label gives
-                  a different figure elsewhere in the document (a possible
-                  conflict, e.g. in-place vs pro forma NOI - the value is
-                  kept, the other passages are in `conflicting_values`).
-- "conflicting" - passages the extraction cited for the field disagree, or
-                  the model said so. The field is left null and every
-                  passage is kept in the withheld entry's
-                  `conflicting_values`.
+- "supported"   - its citation's passage contains it, or a reviewer set it.
+- "uncertain"   - a value exists but needs a look: the model doubted it, its
+                  citation didn't verify, or it is a possible conflict.
+- "conflicting" - passages disagree (or the model said so); the field is null.
 - "missing"     - no value, and nothing proposed for it.
 
-The status is derived from what the profile already records (the field's
-value and evidence, `withheld_values`, the extractor's notes and
-`corrected_fields`) rather than stored separately, so it can never drift out
-of date when a reviewer corrects a field, accepts or dismisses a withheld
-value, or the extractor re-derives a value from reviewer feedback. It is
-exposed as `REPEDealProfile.field_statuses`, which every API response that
-returns a profile includes.
-
-A field a reviewer has corrected is trusted as the reviewer left it: it is
-"supported" (or "missing" if they cleared it) and doesn't need review, even
-if an extractor note about it remains. That mirrors the review form (M2.2),
-where "corrected" outranks every extractor flag. The exception is a newer
-proposal for the field waiting in `withheld_values` (e.g. from re-deriving it
-after reviewer feedback): that needs a reviewer again.
+Statuses are computed from what the profile already records, never stored,
+so they can't go stale when a reviewer changes the profile. A reviewer's
+correction outranks every extractor flag, unless a newer proposal for the
+field is waiting in `withheld_values`.
 """
 
 from __future__ import annotations

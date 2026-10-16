@@ -42,8 +42,7 @@ class FieldEvidence(BaseModel):
 # Why an extracted value was kept out of its field (Milestone 1.1). The first
 # five mean the model's citation didn't hold up; the next three mean the model
 # itself said the value shouldn't be taken at face value. The last
-# (Milestone 1.2) means H9N's own checks found the document stating a
-# different value for the field elsewhere - see WithheldValue.conflicting_values.
+# (Milestone 1.2) means H9N found cited passages that disagree.
 WithheldReason = Literal[
     "no_evidence",
     "page_not_in_document",
@@ -57,19 +56,15 @@ WithheldReason = Literal[
 ]
 
 
-# One value the source document states for a field whose passages disagree
-# (Milestone 1.2), with the verified passage that states it. A conflict keeps
-# one of these for every passage found - the extracted value's and each
-# disagreeing one - so a reviewer sees both sides instead of whichever value
-# the model happened to pick.
+# One value the document states for a field whose passages disagree
+# (Milestone 1.2). A conflict keeps one per passage, so a reviewer sees both
+# sides instead of whichever value the model happened to pick.
 class ConflictingValue(BaseModel):
 
-    # The value as this passage states it, normalized like the field itself
-    # (e.g. "$9.5M" -> 9500000, "6.25%" -> 6.25).
+    # Normalized like the field itself (e.g. "$9.5M" -> 9500000).
     value: Union[int, float, str]
 
-    # Where the document states it. Always a verified citation: the quoted
-    # passage is on the cited page and contains `value`.
+    # Always a verified citation: the quoted passage contains `value`.
     evidence: FieldEvidence
 
 
@@ -99,21 +94,15 @@ class WithheldValue(BaseModel):
     # to where it claimed the value came from.
     evidence: Optional[FieldEvidence] = None
 
-    # Every passage found for a field whose source passages disagree
-    # (reason "conflicting_evidence", or "model_conflicting" when the
-    # disagreeing passages could be verified) - the proposed value's own
-    # passage included - so both sides are preserved for review (Milestone
-    # 1.2). Empty for every other reason.
+    # For a conflict: every passage found, the proposed value's own included
+    # (Milestone 1.2). Empty otherwise.
     conflicting_values: list[ConflictingValue] = Field(default_factory=list)
 
 
-# A value that WAS stored, but whose label appears elsewhere in the document
-# followed by a different figure (Milestone 1.2) - e.g. "NOI: $1,200,000"
-# in the in-place financials and "NOI: $1,500,000" under Pro Forma, or a
-# senior and a mezzanine "Loan Amount". That is often two different things
-# sharing a label rather than a contradiction, so the value is kept, but the
-# field needs a reviewer to confirm which figure it should hold. A reviewer
-# dismisses the flag by removing the entry.
+# A stored value whose label gives a different figure elsewhere in the
+# document (Milestone 1.2), e.g. in-place vs pro forma NOI, or a senior vs a
+# mezzanine loan amount. That is often not a contradiction, so the value is
+# kept and flagged until a reviewer removes this entry or corrects the field.
 class PossibleConflict(BaseModel):
 
     field_name: str
@@ -126,11 +115,9 @@ class PossibleConflict(BaseModel):
     conflicting_values: list[ConflictingValue] = Field(default_factory=list)
 
 
-# Profile fields that describe the extraction or its review rather than the
-# deal. Every other field of a deal profile is a deal value: the model is asked
-# to extract it (extraction_output.VALUE_FIELDS) and it gets a trust status
-# (field_status.py). Add a new bookkeeping field here, or it will be treated
-# as a deal value.
+# Profile fields about the extraction or its review rather than the deal.
+# Every other field is a deal value: the model extracts it and it gets a trust
+# status. Add a new bookkeeping field here, or it will be treated as a value.
 BOOKKEEPING_FIELDS = frozenset(
     {
         "missing_information",
@@ -181,9 +168,7 @@ class BaseDeal(BaseModel):
     # (Milestone 1, item 3 - Uncertainty Flagging).
     uncertain_information: list[str] = Field(default_factory=list)
 
-    # Stored values whose label gives a different figure elsewhere in the
-    # document, kept but flagged for a reviewer (Milestone 1.2). See
-    # PossibleConflict.
+    # Stored values flagged for a reviewer to confirm (Milestone 1.2).
     possible_conflicts: list[PossibleConflict] = Field(default_factory=list)
 
     # Values the extractor proposed but could not verify against the source
