@@ -64,9 +64,8 @@ def test_the_same_label_with_a_different_figure_keeps_the_value_and_flags_it():
         "The same label gives a different figure elsewhere in the document: "
         "10000000 (deal.pdf p.1), 9500000 (deal.pdf p.5)."
     )
-    # Noted as uncertain (not conflicting), in the usual "field: ..." form, so
-    # the M2.2 form marks it without any change.
-    assert deal.uncertain_information == [f"asking_price: {possible.detail}"]
+    # The entry is the only record of the flag; no note repeats it.
+    assert deal.uncertain_information == []
     assert deal.conflicting_information == []
     report = deal.field_statuses["asking_price"]
     assert (report.status, report.needs_review) == ("uncertain", True)

@@ -46,7 +46,6 @@ from pydantic import BaseModel, Field
 
 from backend.app.h9n.schemas.base_deal import (
     BOOKKEEPING_FIELDS,
-    POSSIBLE_CONFLICT_PREFIX,
     ConflictingValue,
     FieldEvidence,
     PossibleConflict,
@@ -82,7 +81,6 @@ __all__ = [
     "FieldStatusReport",
     "assess_field",
     "assess_fields",
-    "dismiss_possible_conflict",
 ]
 
 _CONFLICT_REASONS = {"model_conflicting", "conflicting_evidence"}
@@ -199,22 +197,12 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
         conflict_notes: list[str] = []
         uncertain_notes: list[str] = []
         missing_notes: list[str] = []
+        possible: Optional[PossibleConflict] = None
     else:
         conflict_notes = notes(profile.conflicting_information)
         uncertain_notes = notes(profile.uncertain_information)
         missing_notes = notes(profile.missing_information)
-
-    # A possible conflict is open while its note is in uncertain_information:
-    # the note is what the review form shows, and removing it is how a
-    # reviewer dismisses the flag (see dismiss_possible_conflict). The entry
-    # itself stays as the record of what was found.
-    possible_notes = [note for note in uncertain_notes if note.startswith(POSSIBLE_CONFLICT_PREFIX)]
-    uncertain_notes = [note for note in uncertain_notes if not note.startswith(POSSIBLE_CONFLICT_PREFIX)]
-    possible: Optional[PossibleConflict] = (
-        next((entry for entry in profile.possible_conflicts if entry.field_name == field_name), None)
-        if possible_notes
-        else None
-    )
+        possible = next((entry for entry in profile.possible_conflicts if entry.field_name == field_name), None)
 
     conflicting_values = (list(withheld.conflicting_values) if withheld else []) or (
         list(possible.conflicting_values) if possible else []
@@ -249,10 +237,7 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
         ]
         return report("conflicting", reasons)
 
-    reasons = [
-        FieldStatusReason(code="same_label_different_value", message=possible.detail if possible else note)
-        for note in possible_notes[:1]
-    ]
+    reasons = [FieldStatusReason(code="same_label_different_value", message=possible.detail)] if possible else []
     reasons += [FieldStatusReason(code="model_flagged_uncertain", message=note) for note in uncertain_notes]
     if withheld:
         if withheld.reason == "model_uncertain":
@@ -300,29 +285,6 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
         "supported",
         [FieldStatusReason(code="verified_citation", message="The cited passage contains this value.")],
     )
-
-
-def dismiss_possible_conflict(profile: "BaseDeal", field_name: str) -> dict[str, Any]:
-    """The change that dismisses `field_name`'s possible conflict - a reviewer
-    has checked the stored value and it is the right figure - as a dict to
-    apply with the usual correction path (`PATCH /deals/{id}`).
-
-    It only removes the flag's note from `uncertain_information`, a
-    bookkeeping list in every review path, so the dismissal is never recorded
-    as a corrected deal value, and the review form (which reads the notes)
-    and `field_statuses` agree straight away. The PossibleConflict entry is
-    kept as the record of the passages that were found.
-
-    Raises ValueError if the field has no open possible conflict.
-    """
-    remaining = [
-        note
-        for note in profile.uncertain_information
-        if not (note_names_field(note, field_name) and note_text(note, field_name).startswith(POSSIBLE_CONFLICT_PREFIX))
-    ]
-    if len(remaining) == len(profile.uncertain_information):
-        raise ValueError(f"{field_name!r} has no open possible conflict to dismiss.")
-    return {"uncertain_information": remaining}
 
 
 def assess_fields(profile: "BaseDeal") -> dict[str, FieldStatusReport]:

@@ -51,7 +51,6 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from backend.app.h9n.schemas.base_deal import (
     BOOKKEEPING_FIELDS,
-    POSSIBLE_CONFLICT_PREFIX,
     ConflictingValue,
     EvidenceVerification,
     FieldEvidence,
@@ -684,7 +683,7 @@ def _evidence_by_field(entries: list[ExtractedEvidence]) -> dict[str, list[Extra
 #    of the same kind ("NOI: $1,500,000"). Deal packages reuse labels across
 #    sections - in-place vs pro forma, senior vs mezzanine loan - so this is
 #    only a *possible* conflict: the value is kept, and a PossibleConflict
-#    plus an uncertain_information note ask a reviewer to confirm it.
+#    asks a reviewer to confirm it.
 #
 # To keep check 2 quiet, a label must be specific (not "Total:" or "Price:"),
 # a line holding several figures after the label (a year-by-year or
@@ -1019,7 +1018,7 @@ def _describe_conflict(value: Any, values: list[ConflictingValue], citation_prob
 
 def _describe_possible_conflict(values: list[ConflictingValue]) -> str:
     return (
-        f"{POSSIBLE_CONFLICT_PREFIX}: {_listed(values)}. "
+        f"The same label gives a different figure elsewhere in the document: {_listed(values)}. "
         "It may be another section's figure (e.g. pro forma, or another loan); confirm which one this field holds."
     )
 
@@ -1127,7 +1126,7 @@ def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]])
 
     uncertain_information = [
         f"{flag.field_name}: {flag.note}" for flag in output.field_flags if flag.flag == "uncertain"
-    ] + [f"{possible.field_name}: {possible.detail}" for possible in possible_conflicts]
+    ]
     conflicting_information = [
         f"{flag.field_name}: {flag.note}" for flag in output.field_flags if flag.flag == "conflicting"
     ] + detected_conflicts

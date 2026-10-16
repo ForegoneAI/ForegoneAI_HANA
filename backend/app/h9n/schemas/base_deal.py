@@ -112,16 +112,8 @@ class WithheldValue(BaseModel):
 # in the in-place financials and "NOI: $1,500,000" under Pro Forma, or a
 # senior and a mezzanine "Loan Amount". That is often two different things
 # sharing a label rather than a contradiction, so the value is kept, but the
-# field needs a reviewer to confirm which figure it should hold.
-#
-# Its `detail` is also added to uncertain_information as a note, which is
-# what the review form shows, and always starts with POSSIBLE_CONFLICT_PREFIX.
-# The flag is open while that note is there: a reviewer dismisses it by
-# removing the note (field_status.dismiss_possible_conflict), and the entry
-# stays as the record of the passages found.
-POSSIBLE_CONFLICT_PREFIX = "The same label gives a different figure elsewhere in the document"
-
-
+# field needs a reviewer to confirm which figure it should hold. A reviewer
+# dismisses the flag by removing the entry.
 class PossibleConflict(BaseModel):
 
     field_name: str

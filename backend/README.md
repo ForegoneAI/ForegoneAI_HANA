@@ -223,12 +223,10 @@ Some non-obvious behavior:
     value's citation ("NOI:") starts another line or sentence directly followed by a different
     figure ("NOI: $1,500,000"), it is often another section's figure - in-place vs pro forma, a
     senior vs a mezzanine loan - not a contradiction. The value is **kept**; a `possible_conflicts`
-    entry holds every passage, an `uncertain_information` note is added, and the field reads
-    `uncertain` while that note is there. A reviewer who has checked the value dismisses the flag by
-    removing the note - `field_status.dismiss_possible_conflict(profile, field)` returns that change
-    for the usual `PATCH`. It only touches `uncertain_information`, so it is never recorded as a
-    corrected value, and the review form and `field_statuses` always agree. Correcting the field's
-    value also settles it.
+    entry holds every passage, and the field reads `uncertain` while that entry is there. A reviewer
+    who has checked the value dismisses the flag by removing the entry with the usual `PATCH`
+    (`possible_conflicts` is bookkeeping, so this is never recorded as a corrected value).
+    Correcting the field's value also settles it.
 
   To keep the label check quiet, a generic label ("Total:", "Price:"), a longer label that merely
   contains this one ("Pro Forma Asking Price"), a line with several figures after the label (a row
