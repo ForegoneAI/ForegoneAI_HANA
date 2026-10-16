@@ -47,7 +47,6 @@ from pydantic import BaseModel, Field
 from backend.app.h9n.schemas.base_deal import (
     BOOKKEEPING_FIELDS,
     ConflictingValue,
-    FieldEvidence,
     PossibleConflict,
     WithheldValue,
 )
@@ -105,17 +104,9 @@ class FieldStatusReport(BaseModel):
 
     reasons: list[FieldStatusReason] = Field(default_factory=list)
 
-    # The value waiting in withheld_values for a reviewer, if any.
-    proposed_value: Optional[Any] = None
-
     # For a conflict or possible conflict: every passage found and the value
     # it states. Several passages can state the same value.
     conflicting_values: list[ConflictingValue] = Field(default_factory=list)
-
-    # Every citation H9N holds for the field - the stored value's, the
-    # withheld proposal's, and each conflicting passage - de-duplicated, so a
-    # reviewer can check them all from one place.
-    evidence: list[FieldEvidence] = Field(default_factory=list)
 
 
 def note_names_field(note: str, field_name: str) -> bool:
@@ -151,17 +142,6 @@ def _has_value(value: Any) -> bool:
     return value is not None and not (isinstance(value, str) and not value.strip())
 
 
-def _dedupe(entries: list[FieldEvidence]) -> list[FieldEvidence]:
-    seen: set[tuple[Any, ...]] = set()
-    unique = []
-    for entry in entries:
-        key = (entry.source_document, entry.page_number, " ".join((entry.snippet or "").split()).casefold())
-        if key not in seen:
-            seen.add(key)
-            unique.append(entry)
-    return unique
-
-
 def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
     """The status of one deal value field, as the profile stands now."""
     value = getattr(profile, field_name)
@@ -187,7 +167,6 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
                     message="Set by a reviewer." if has_value else "Cleared by a reviewer.",
                 )
             ],
-            evidence=_dedupe(stored),
         )
 
     if corrected:
@@ -207,11 +186,6 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
     conflicting_values = (list(withheld.conflicting_values) if withheld else []) or (
         list(possible.conflicting_values) if possible else []
     )
-    evidence = _dedupe(
-        stored
-        + ([withheld.evidence] if withheld and withheld.evidence else [])
-        + [candidate.evidence for candidate in conflicting_values]
-    )
 
     def report(status: FieldStatus, reasons: list[FieldStatusReason]) -> FieldStatusReport:
         return FieldStatusReport(
@@ -219,9 +193,7 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
             needs_review=status != "supported",
             reviewer_corrected=corrected,
             reasons=reasons,
-            proposed_value=withheld.proposed_value if withheld else None,
             conflicting_values=conflicting_values,
-            evidence=evidence,
         )
 
     if (withheld and withheld.reason in _CONFLICT_REASONS) or conflict_notes:

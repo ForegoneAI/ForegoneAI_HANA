@@ -55,7 +55,6 @@ def test_a_value_with_a_verified_citation_is_supported():
     assert report.status == "supported"
     assert report.needs_review is False
     assert [reason.code for reason in report.reasons] == ["verified_citation"]
-    assert report.evidence == deal.evidence
 
 
 def test_a_field_with_no_value_is_missing():
@@ -118,15 +117,6 @@ def test_values_that_shouldnt_be_relied_on_yet_are_uncertain(deal, code):
     assert code in [reason.code for reason in report.reasons]
 
 
-def test_a_withheld_value_is_offered_as_the_proposed_value():
-    deal = REPEDealProfile(
-        withheld_values=[WithheldValue(field_name="noi", proposed_value=650_000, reason="no_evidence", detail="x")]
-    )
-
-    assert _status(deal, "noi").proposed_value == 650_000
-    assert _status(deal, "cap_rate").proposed_value is None
-
-
 def test_a_narrative_field_with_a_quote_only_citation_is_uncertain():
     # extraction_output.QUOTE_ONLY_FIELDS: the quote was found but the
     # summarized value can't be matched word for word, so a human should look.
@@ -166,12 +156,6 @@ def test_a_conflict_carries_every_passage_and_its_value():
     assert report.conflicting_values == passages
     # One reason, not the same text twice from the withheld entry and its note.
     assert [r.code for r in report.reasons] == ["conflicting_values"]
-    # Every citation in one place, de-duplicated (the withheld entry's own
-    # citation is the same passage as the first conflicting value).
-    assert [(e.page_number, e.snippet) for e in report.evidence] == [
-        (1, "asking_price: 10000000"),
-        (5, "asking_price: 9500000"),
-    ]
 
 
 def test_a_conflict_note_alone_makes_a_field_conflicting():
@@ -235,7 +219,6 @@ def test_a_newer_proposal_for_a_corrected_field_needs_review_again():
     report = _status(deal, "noi")
 
     assert (report.status, report.needs_review, report.reviewer_corrected) == ("uncertain", True, True)
-    assert report.proposed_value == 650_000
     # Notes from before the correction no longer count; the proposal does.
     assert [r.code for r in report.reasons] == ["unverified_value", "reviewer_corrected"]
 
@@ -261,7 +244,6 @@ def test_a_possible_conflict_flags_a_stored_value_as_uncertain():
     assert (report.status, report.needs_review) == ("uncertain", True)
     assert [(r.code, r.message) for r in report.reasons] == [("same_label_different_value", detail)]
     assert report.conflicting_values == passages
-    assert [e.page_number for e in report.evidence] == [1, 7]
 
     # Correcting the value also settles it.
     deal.corrected_fields.append("noi")
@@ -363,9 +345,7 @@ def test_an_api_response_includes_the_statuses():
         "needs_review": True,
         "reviewer_corrected": False,
         "reasons": [{"code": "not_stated", "message": "No value was found in the document."}],
-        "proposed_value": None,
         "conflicting_values": [],
-        "evidence": [],
     }
     schemas = app.openapi()["components"]["schemas"]
     profile_schema = next(schema for name, schema in schemas.items() if name.startswith("REPEDealProfile"))

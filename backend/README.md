@@ -187,12 +187,10 @@ UI or script can tell what to trust without reading the notes:
   "reviewer_corrected": false,
   "reasons": [{"code": "conflicting_values",
                "message": "The document gives different values: 10000000 (om.pdf p.1), 9500000 (om.pdf p.5)."}],
-  "proposed_value": 10000000,
   "conflicting_values": [
     {"value": 10000000, "evidence": {"page_number": 1, "snippet": "Asking Price: $10,000,000", ...}},
     {"value": 9500000,  "evidence": {"page_number": 5, "snippet": "Asking Price: $9,500,000", ...}}
-  ],
-  "evidence": [...]
+  ]
 }
 ```
 
