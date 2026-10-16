@@ -41,12 +41,8 @@ class REPEDealProfile(BaseDeal):
     investment_strategy: Optional[str] = None
     business_plan: Optional[str] = None
 
-    # How far each value field can be trusted - "supported", "uncertain",
-    # "missing" or "conflicting" - and why (Milestone 1.2). Computed from the
-    # rest of the profile every time it's read or serialized, so it is always
-    # current and appears in every API response that returns a profile; it
-    # can't be set directly, and an incoming copy of it is ignored. See
-    # schemas/field_status.py.
+    # Each value field's trust status and why (Milestone 1.2). Computed on
+    # every read, so it is always current and can't be set. See field_status.py.
     @computed_field  # type: ignore[prop-decorator]
     @property
     def field_statuses(self) -> dict[str, FieldStatusReport]:

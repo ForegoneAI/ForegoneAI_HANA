@@ -40,6 +40,7 @@ _TRACKING_FIELDS = {
     "evidence",
     "uncertain_information",
     "withheld_values",
+    "possible_conflicts",
     "corrected_fields",
     "review_status",
     "review_feedback",

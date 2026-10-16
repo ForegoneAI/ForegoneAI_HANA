@@ -1,41 +1,19 @@
 """
 field_status.py
 
-H9N Milestone 1.2 - one trust status per extracted field, so a UI or API
-caller can tell a value it can rely on from one a human needs to look at
-without reading the profile's free-text notes.
+H9N Milestone 1.2 - one trust status per extracted deal field, so a UI or API
+caller can tell a value it can rely on from one a human needs to check:
 
-Every deal value field gets exactly one status:
-
-- "supported"   - a value backed by a verified citation whose quoted passage
-                  contains it, or a value a reviewer set or confirmed.
-- "uncertain"   - a value was found but shouldn't be relied on yet: the model
-                  doubted it, its citation didn't check out, it only has a
-                  "quote_only" citation (narrative fields the model
-                  summarizes), it has no citation at all, or its label gives
-                  a different figure elsewhere in the document (a possible
-                  conflict, e.g. in-place vs pro forma NOI - the value is
-                  kept, the other passages are in `conflicting_values`).
-- "conflicting" - passages the extraction cited for the field disagree, or
-                  the model said so. The field is left null and every
-                  passage is kept in the withheld entry's
-                  `conflicting_values`.
+- "supported"   - its citation's passage contains it, or a reviewer set it.
+- "uncertain"   - a value exists but needs a look: the model doubted it, its
+                  citation didn't verify, or it is a possible conflict.
+- "conflicting" - passages disagree (or the model said so); the field is null.
 - "missing"     - no value, and nothing proposed for it.
 
-The status is derived from what the profile already records (the field's
-value and evidence, `withheld_values`, the extractor's notes and
-`corrected_fields`) rather than stored separately, so it can never drift out
-of date when a reviewer corrects a field, accepts or dismisses a withheld
-value, or the extractor re-derives a value from reviewer feedback. It is
-exposed as `REPEDealProfile.field_statuses`, which every API response that
-returns a profile includes.
-
-A field a reviewer has corrected is trusted as the reviewer left it: it is
-"supported" (or "missing" if they cleared it) and doesn't need review, even
-if an extractor note about it remains. That mirrors the review form (M2.2),
-where "corrected" outranks every extractor flag. The exception is a newer
-proposal for the field waiting in `withheld_values` (e.g. from re-deriving it
-after reviewer feedback): that needs a reviewer again.
+Statuses are computed from what the profile already records, never stored,
+so they can't go stale when a reviewer changes the profile. A reviewer's
+correction outranks every extractor flag, unless a newer proposal for the
+field is waiting in `withheld_values`.
 """
 
 from __future__ import annotations
@@ -46,9 +24,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.h9n.schemas.base_deal import (
     BOOKKEEPING_FIELDS,
-    POSSIBLE_CONFLICT_PREFIX,
     ConflictingValue,
-    FieldEvidence,
     PossibleConflict,
     WithheldValue,
 )
@@ -74,17 +50,6 @@ FieldStatusReasonCode = Literal[
     "not_stated",  # no value and no note
 ]
 
-# Every field not in base_deal.BOOKKEEPING_FIELDS is a deal value and gets a
-# status. Re-exported here for callers that read statuses.
-__all__ = [
-    "BOOKKEEPING_FIELDS",
-    "FieldStatus",
-    "FieldStatusReport",
-    "assess_field",
-    "assess_fields",
-    "dismiss_possible_conflict",
-]
-
 _CONFLICT_REASONS = {"model_conflicting", "conflicting_evidence"}
 
 
@@ -107,17 +72,9 @@ class FieldStatusReport(BaseModel):
 
     reasons: list[FieldStatusReason] = Field(default_factory=list)
 
-    # The value waiting in withheld_values for a reviewer, if any.
-    proposed_value: Optional[Any] = None
-
     # For a conflict or possible conflict: every passage found and the value
     # it states. Several passages can state the same value.
     conflicting_values: list[ConflictingValue] = Field(default_factory=list)
-
-    # Every citation H9N holds for the field - the stored value's, the
-    # withheld proposal's, and each conflicting passage - de-duplicated, so a
-    # reviewer can check them all from one place.
-    evidence: list[FieldEvidence] = Field(default_factory=list)
 
 
 def note_names_field(note: str, field_name: str) -> bool:
@@ -144,30 +101,10 @@ def note_text(note: str, field_name: str) -> str:
     return stripped
 
 
-def value_fields(profile: "BaseDeal") -> list[str]:
-    """The deal value fields of a profile, in schema order."""
-    return [name for name in type(profile).model_fields if name not in BOOKKEEPING_FIELDS]
-
-
-def _has_value(value: Any) -> bool:
-    return value is not None and not (isinstance(value, str) and not value.strip())
-
-
-def _dedupe(entries: list[FieldEvidence]) -> list[FieldEvidence]:
-    seen: set[tuple[Any, ...]] = set()
-    unique = []
-    for entry in entries:
-        key = (entry.source_document, entry.page_number, " ".join((entry.snippet or "").split()).casefold())
-        if key not in seen:
-            seen.add(key)
-            unique.append(entry)
-    return unique
-
-
 def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
     """The status of one deal value field, as the profile stands now."""
     value = getattr(profile, field_name)
-    has_value = _has_value(value)
+    has_value = value is not None and not (isinstance(value, str) and not value.strip())
     stored = [entry for entry in profile.evidence if entry.field_name == field_name]
     withheld: Optional[WithheldValue] = next(
         (entry for entry in profile.withheld_values if entry.field_name == field_name), None
@@ -189,7 +126,6 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
                     message="Set by a reviewer." if has_value else "Cleared by a reviewer.",
                 )
             ],
-            evidence=_dedupe(stored),
         )
 
     if corrected:
@@ -199,30 +135,15 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
         conflict_notes: list[str] = []
         uncertain_notes: list[str] = []
         missing_notes: list[str] = []
+        possible: Optional[PossibleConflict] = None
     else:
         conflict_notes = notes(profile.conflicting_information)
         uncertain_notes = notes(profile.uncertain_information)
         missing_notes = notes(profile.missing_information)
-
-    # A possible conflict is open while its note is in uncertain_information:
-    # the note is what the review form shows, and removing it is how a
-    # reviewer dismisses the flag (see dismiss_possible_conflict). The entry
-    # itself stays as the record of what was found.
-    possible_notes = [note for note in uncertain_notes if note.startswith(POSSIBLE_CONFLICT_PREFIX)]
-    uncertain_notes = [note for note in uncertain_notes if not note.startswith(POSSIBLE_CONFLICT_PREFIX)]
-    possible: Optional[PossibleConflict] = (
-        next((entry for entry in profile.possible_conflicts if entry.field_name == field_name), None)
-        if possible_notes
-        else None
-    )
+        possible = next((entry for entry in profile.possible_conflicts if entry.field_name == field_name), None)
 
     conflicting_values = (list(withheld.conflicting_values) if withheld else []) or (
         list(possible.conflicting_values) if possible else []
-    )
-    evidence = _dedupe(
-        stored
-        + ([withheld.evidence] if withheld and withheld.evidence else [])
-        + [candidate.evidence for candidate in conflicting_values]
     )
 
     def report(status: FieldStatus, reasons: list[FieldStatusReason]) -> FieldStatusReport:
@@ -231,9 +152,7 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
             needs_review=status != "supported",
             reviewer_corrected=corrected,
             reasons=reasons,
-            proposed_value=withheld.proposed_value if withheld else None,
             conflicting_values=conflicting_values,
-            evidence=evidence,
         )
 
     if (withheld and withheld.reason in _CONFLICT_REASONS) or conflict_notes:
@@ -249,10 +168,7 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
         ]
         return report("conflicting", reasons)
 
-    reasons = [
-        FieldStatusReason(code="same_label_different_value", message=possible.detail if possible else note)
-        for note in possible_notes[:1]
-    ]
+    reasons = [FieldStatusReason(code="same_label_different_value", message=possible.detail)] if possible else []
     reasons += [FieldStatusReason(code="model_flagged_uncertain", message=note) for note in uncertain_notes]
     if withheld:
         if withheld.reason == "model_uncertain":
@@ -302,29 +218,8 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
     )
 
 
-def dismiss_possible_conflict(profile: "BaseDeal", field_name: str) -> dict[str, Any]:
-    """The change that dismisses `field_name`'s possible conflict - a reviewer
-    has checked the stored value and it is the right figure - as a dict to
-    apply with the usual correction path (`PATCH /deals/{id}`).
-
-    It only removes the flag's note from `uncertain_information`, a
-    bookkeeping list in every review path, so the dismissal is never recorded
-    as a corrected deal value, and the review form (which reads the notes)
-    and `field_statuses` agree straight away. The PossibleConflict entry is
-    kept as the record of the passages that were found.
-
-    Raises ValueError if the field has no open possible conflict.
-    """
-    remaining = [
-        note
-        for note in profile.uncertain_information
-        if not (note_names_field(note, field_name) and note_text(note, field_name).startswith(POSSIBLE_CONFLICT_PREFIX))
-    ]
-    if len(remaining) == len(profile.uncertain_information):
-        raise ValueError(f"{field_name!r} has no open possible conflict to dismiss.")
-    return {"uncertain_information": remaining}
-
-
 def assess_fields(profile: "BaseDeal") -> dict[str, FieldStatusReport]:
     """Every deal value field's status, in schema order."""
-    return {name: assess_field(profile, name) for name in value_fields(profile)}
+    return {
+        name: assess_field(profile, name) for name in type(profile).model_fields if name not in BOOKKEEPING_FIELDS
+    }

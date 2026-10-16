@@ -28,14 +28,9 @@ Two layers stand between the model and the database:
    recorded in `withheld_values` with the proposed value, the reason, and the
    citation, so a human reviewer can accept or dismiss it (Milestone 2).
 
-3. Milestone 1.2 adds conflict detection to `enforce_integrity`. A value is
-   withheld as "conflicting_evidence" when another passage the model cited
-   for the field verifies with a different value; every passage is kept in
-   the withheld entry's `conflicting_values`, so both sides reach the
-   reviewer. A stored value whose label introduces a different figure
-   elsewhere ("NOI: $1,500,000" under Pro Forma) is kept but recorded as a
-   `PossibleConflict` for a reviewer to confirm. See "Conflict detection"
-   below for exactly what counts.
+3. Milestone 1.2 adds conflict detection to `enforce_integrity` (see
+   "Conflict detection" below): cited passages that disagree withhold the
+   value, and a label that gives another figure elsewhere flags it.
 """
 
 from __future__ import annotations
@@ -51,7 +46,6 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from backend.app.h9n.schemas.base_deal import (
     BOOKKEEPING_FIELDS,
-    POSSIBLE_CONFLICT_PREFIX,
     ConflictingValue,
     EvidenceVerification,
     FieldEvidence,
@@ -73,10 +67,8 @@ _META_FIELDS = {
     "evidence",
 }
 
-# Fields only H9N, a human reviewer or the review workflow may set: every
-# other bookkeeping field (base_deal.BOOKKEEPING_FIELDS, the one list of them).
-# They are kept out of the tool schemas entirely, so the model cannot approve
-# its own work - and a bookkeeping field added later is kept out by default.
+# Bookkeeping fields only H9N or a reviewer may set. They are kept out of the
+# tool schemas entirely, so the model cannot approve its own work.
 NON_EXTRACTABLE_FIELDS = BOOKKEEPING_FIELDS - _META_FIELDS
 
 # Every deal value the model is asked to extract, in schema order - and every
@@ -668,29 +660,21 @@ def _evidence_by_field(entries: list[ExtractedEvidence]) -> dict[str, list[Extra
 
 # --- Conflict detection (Milestone 1.2) --------------------------------------
 #
-# Two deterministic checks, on top of the model's own "conflicting" flag:
+# Two checks, on top of the model's own "conflicting" flag. Every passage
+# either check keeps is verified the same way as a citation.
 #
 # 1. Conflicting citations: another passage the model cited for the field
-#    verifies (it is on the cited page and contains the value it was cited
-#    for) with a different value. The model itself tied both passages to the
-#    same field, so this is a conflict: the value is withheld as
-#    "conflicting_evidence" with every passage in `conflicting_values`.
-#    Numeric fields only, unless the model flagged the field as conflicting -
-#    two text passages naming a property differently ("Meadowbrook" /
-#    "Meadowbrook Apartments") aren't a conflict.
-# 2. Same label, different figure: for a numeric value that is about to be
-#    stored, the label in front of its citation ("noi" in "NOI: $1,200,000")
-#    starts another line or sentence directly followed by a different figure
-#    of the same kind ("NOI: $1,500,000"). Deal packages reuse labels across
-#    sections - in-place vs pro forma, senior vs mezzanine loan - so this is
-#    only a *possible* conflict: the value is kept, and a PossibleConflict
-#    plus an uncertain_information note ask a reviewer to confirm it.
-#
-# To keep check 2 quiet, a label must be specific (not "Total:" or "Price:"),
-# a line holding several figures after the label (a year-by-year or
-# sensitivity row, "6.0%-6.5%") is ignored, and every passage is verified the
-# same way as a citation. The document is split and normalized once, and a
-# line is only parsed for numbers if the label is on it.
+#    verifies with a different value. The value is withheld as
+#    "conflicting_evidence", keeping every passage. Numeric fields only,
+#    unless the model flagged the field: text passages often name the same
+#    thing differently ("Meadowbrook" / "Meadowbrook Apartments").
+# 2. Same label, different figure: the label in front of a stored numeric
+#    value ("NOI:") starts another line or sentence directly followed by a
+#    different figure. Packages reuse labels across sections (in-place vs pro
+#    forma, senior vs mezzanine loan), so the value is kept and a
+#    PossibleConflict asks a reviewer to confirm it. Generic labels ("Total:")
+#    and lines with several figures after the label (a row of years, a range)
+#    are ignored to keep this quiet.
 
 # A label longer than this is a sentence, not a label.
 MAX_LABEL_CHARS = 40
@@ -794,12 +778,6 @@ class _Passage:
     page: dict[str, Any]
     text: str  # as on the page, so it can be quoted verbatim
     normalized: str
-    _numbers: Optional[list[_Number]] = None
-
-    def numbers(self) -> list[_Number]:
-        if self._numbers is None:
-            self._numbers = _numbers(self.normalized)
-        return self._numbers
 
 
 def _index_passages(pages: list[dict[str, Any]]) -> list[_Passage]:
@@ -845,7 +823,7 @@ def _labelled_value(field_name: str, label: str, passage: _Passage) -> Optional[
         if starts_clause and ends_word:
             gap_end = _LABEL_GAP.match(text, end).end()
             if gap_end - end <= 12:
-                following = [n for n in passage.numbers() if n.start >= gap_end]
+                following = [n for n in _numbers(text) if n.start >= gap_end]
                 first = following[0] if following else None
                 if first is not None and first.start == gap_end:
                     if _ambiguous_figure(field_name, text, first, following[1:]):
@@ -1017,13 +995,6 @@ def _describe_conflict(value: Any, values: list[ConflictingValue], citation_prob
     )
 
 
-def _describe_possible_conflict(values: list[ConflictingValue]) -> str:
-    return (
-        f"{POSSIBLE_CONFLICT_PREFIX}: {_listed(values)}. "
-        "It may be another section's figure (e.g. pro forma, or another loan); confirm which one this field holds."
-    )
-
-
 def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]]) -> REPEDealProfile:
     """Turns a validated extraction into a REPEDealProfile holding only verified values.
 
@@ -1096,12 +1067,13 @@ def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]])
             same_label = _same_label_passages(field_name, value, check.verified, passages)
             if same_label:
                 possible = own + same_label
+                detail = (
+                    f"The same label gives a different figure elsewhere in the document: {_listed(possible)}. "
+                    "It may be another section's figure (e.g. pro forma, or another loan); "
+                    "confirm which one this field holds."
+                )
                 possible_conflicts.append(
-                    PossibleConflict(
-                        field_name=field_name,
-                        detail=_describe_possible_conflict(possible),
-                        conflicting_values=possible,
-                    )
+                    PossibleConflict(field_name=field_name, detail=detail, conflicting_values=possible)
                 )
             continue
         else:
@@ -1127,7 +1099,7 @@ def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]])
 
     uncertain_information = [
         f"{flag.field_name}: {flag.note}" for flag in output.field_flags if flag.flag == "uncertain"
-    ] + [f"{possible.field_name}: {possible.detail}" for possible in possible_conflicts]
+    ]
     conflicting_information = [
         f"{flag.field_name}: {flag.note}" for flag in output.field_flags if flag.flag == "conflicting"
     ] + detected_conflicts
