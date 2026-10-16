@@ -1,5 +1,5 @@
 {
-  "dataset_version": "0.1.1-draft",
+  "dataset_version": "0.1.2-draft",
   "cases": [
     {
       "case_id": "roderick",
@@ -13,118 +13,7 @@
         "roderick_market",
         "roderick_model"
       ],
-      "requested_fields": {
-        "target_equity_raise": {
-          "unit": "USD",
-          "description": "Portfolio target equity raise, not total capitalization.",
-          "scope": "reference"
-        },
-        "total_capital_stack": {
-          "unit": "USD",
-          "description": "Total stack with leverage as stated in investor deck.",
-          "scope": "reference"
-        },
-        "investor_deck_preferred_return": {
-          "unit": "ratio",
-          "description": "Investor deck stated preferred return; no assumption that it is annualized.",
-          "scope": "reference"
-        },
-        "investor_deck_duration_months": {
-          "unit": "months",
-          "description": "Investor deck duration range, preserve both endpoints.",
-          "scope": "reference"
-        },
-        "pitch_term_months": {
-          "unit": "months",
-          "description": "Overall term in pitch executive summary, distinct from Phase 1.",
-          "scope": "reference"
-        },
-        "pitch_preferred_return": {
-          "unit": "ratio",
-          "description": "Preferred return range stated in pitch summary.",
-          "scope": "reference"
-        },
-        "pitch_target_irr": {
-          "unit": "ratio",
-          "description": "Target IRR as stated, not independently validated.",
-          "scope": "reference"
-        },
-        "lot15_pitch_land_cost": {
-          "unit": "USD",
-          "description": "lot15 pitch land cost",
-          "scope": "reference"
-        },
-        "lot15_pitch_build_cost": {
-          "unit": "USD",
-          "description": "lot15 pitch build cost",
-          "scope": "reference"
-        },
-        "lot15_pitch_total_cost": {
-          "unit": "USD",
-          "description": "lot15 pitch total cost",
-          "scope": "reference"
-        },
-        "lot15_pitch_sale_lower_bound": {
-          "unit": "USD",
-          "description": "Projected sell has a plus sign; this field is the lower bound, not an exact sale price.",
-          "scope": "reference"
-        },
-        "lot15_base_build_area": {
-          "unit": "sqft",
-          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result.",
-          "scope": "reference"
-        },
-        "lot15_base_build_cost": {
-          "unit": "USD",
-          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result.",
-          "scope": "reference"
-        },
-        "lot15_base_total_cost": {
-          "unit": "USD",
-          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result.",
-          "scope": "reference"
-        },
-        "lot15_base_revenue": {
-          "unit": "USD",
-          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result.",
-          "scope": "reference"
-        },
-        "lot15_base_net": {
-          "unit": "USD",
-          "description": "Base/Average scenario; preserve signed cash outflows and cached formula result.",
-          "scope": "reference"
-        },
-        "lot15_bear_net": {
-          "unit": "USD",
-          "description": "Bearish scenario, not base.",
-          "scope": "reference"
-        },
-        "community_base_land_outflow": {
-          "unit": "USD",
-          "description": "Use exact sheet spelling; preserve negative outflow.",
-          "scope": "reference"
-        },
-        "reconciled_lot15_build_cost": {
-          "unit": "USD",
-          "description": "Resolve reconciled lot15 build cost: if supplied sources disagree, report conflict with all distinct candidate values and their evidence.",
-          "scope": "reference"
-        },
-        "reconciled_term_months": {
-          "unit": "months",
-          "description": "Resolve reconciled term months: if supplied sources disagree, report conflict with all distinct candidate values and their evidence.",
-          "scope": "reference"
-        },
-        "committed_bank_lender": {
-          "unit": "text",
-          "description": "committed bank lender. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
-        },
-        "executed_loan_interest_rate": {
-          "unit": "ratio",
-          "description": "executed loan interest rate. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
-        }
-      }
+      "requested_fields": {}
     },
     {
       "case_id": "opulent",
@@ -137,130 +26,9 @@
         "opulent_model"
       ],
       "requested_fields": {
-        "land_area": {
-          "unit": "sqm",
-          "description": "Source-stated land area. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "villa_keys": {
+        "units": {
           "unit": "count",
-          "description": "Source-stated villa keys. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "residence_keys": {
-          "unit": "count",
-          "description": "Source-stated residence keys. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "hotel_keys": {
-          "unit": "count",
-          "description": "Source-stated hotel keys. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "total_keys": {
-          "unit": "count",
-          "description": "Source-stated total keys. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "deck_total_development_cost": {
-          "unit": "USD",
-          "description": "Source-stated deck total development cost. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "deck_capital_raise": {
-          "unit": "USD",
-          "description": "Source-stated deck capital raise. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "deck_lp_equity_raise": {
-          "unit": "USD",
-          "description": "Source-stated deck lp equity raise. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "secured_presales": {
-          "unit": "USD",
-          "description": "Source-stated secured presales. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "presale_lois": {
-          "unit": "USD",
-          "description": "Source-stated presale lois. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "optional_bridge_escrow": {
-          "unit": "USD",
-          "description": "Source-stated optional bridge escrow. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "deck_year5_revenue": {
-          "unit": "USD",
-          "description": "Source-stated deck year5 revenue. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "deck_year5_ebitda": {
-          "unit": "USD",
-          "description": "Source-stated deck year5 ebitda. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "deck_exit_valuation": {
-          "unit": "USD",
-          "description": "Source-stated deck exit valuation. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "deck_exit_cap_rate": {
-          "unit": "ratio",
-          "description": "Source-stated deck exit cap rate. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "soft_opening_year": {
-          "unit": "year",
-          "description": "Source-stated soft opening year. Do not reconcile with other sources in this source-specific field.",
-          "scope": "reference"
-        },
-        "model_occupancy": {
-          "unit": "ratio",
-          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed.",
-          "scope": "reference"
-        },
-        "model_year5_revenue": {
-          "unit": "USD",
-          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed.",
-          "scope": "reference"
-        },
-        "model_year5_ebitda": {
-          "unit": "USD",
-          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed.",
-          "scope": "reference"
-        },
-        "model_exit_valuation": {
-          "unit": "USD",
-          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed.",
-          "scope": "reference"
-        },
-        "model_lp_equity_share": {
-          "unit": "ratio",
-          "description": "Workbook cached value; distinct from the deck. No formula recalculation performed.",
-          "scope": "reference"
-        },
-        "reconciled_year5_revenue": {
-          "unit": "USD",
-          "description": "Resolve reconciled year5 revenue: if supplied sources disagree, report conflict with all distinct candidate values and their evidence.",
-          "scope": "reference"
-        },
-        "reconciled_total_cost": {
-          "unit": "USD",
-          "description": "Resolve reconciled total cost: if supplied sources disagree, report conflict with all distinct candidate values and their evidence.",
-          "scope": "reference"
-        },
-        "executed_senior_loan_rate": {
-          "unit": "ratio",
-          "description": "executed senior loan rate. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
-        },
-        "signed_land_deed_date": {
-          "unit": "date",
-          "description": "signed land deed date. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
+          "description": "Number of units (residential units, keys, or suites as stated). (Benchmark field 'total_keys': Source-stated total keys. Do not reconcile with other sources in this source-specific field.)"
         }
       }
     },
@@ -275,48 +43,19 @@
       "requested_fields": {
         "asking_price": {
           "unit": "USD",
-          "description": "asking price",
-          "scope": "production"
+          "description": "asking price"
         },
         "square_feet": {
           "unit": "sqft",
-          "description": "The property's stated size in square feet (building or rentable area). (Benchmark field 'building_area': building area)",
-          "scope": "production"
-        },
-        "lot_area": {
-          "unit": "acres",
-          "description": "lot area",
-          "scope": "reference"
+          "description": "The property's stated size in square feet (building or rentable area). (Benchmark field 'building_area': building area)"
         },
         "units": {
           "unit": "count",
-          "description": "units",
-          "scope": "production"
-        },
-        "average_unit_area": {
-          "unit": "sqft",
-          "description": "average unit area",
-          "scope": "reference"
+          "description": "units"
         },
         "year_built": {
           "unit": "year",
-          "description": "year built",
-          "scope": "production"
-        },
-        "parking_spaces": {
-          "unit": "count",
-          "description": "parking spaces",
-          "scope": "reference"
-        },
-        "lp_preferred_return": {
-          "unit": "ratio",
-          "description": "lp preferred return. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
-        },
-        "lp_minimum_subscription": {
-          "unit": "USD",
-          "description": "lp minimum subscription. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
+          "description": "year built"
         }
       }
     },
@@ -331,73 +70,31 @@
       "requested_fields": {
         "units": {
           "unit": "count",
-          "description": "units",
-          "scope": "production"
+          "description": "units"
         },
         "asking_price": {
           "unit": "USD",
-          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.",
-          "scope": "production"
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
         },
         "cap_rate": {
           "unit": "ratio",
-          "description": "Current (in-place) cap rate as a ratio; not pro forma. (Benchmark field 'current_cap_rate': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)",
-          "scope": "production"
-        },
-        "proforma_cap_rate": {
-          "unit": "ratio",
-          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.",
-          "scope": "reference"
+          "description": "Current (in-place) cap rate as a ratio; not pro forma. (Benchmark field 'current_cap_rate': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
         },
         "noi": {
           "unit": "USD",
-          "description": "Current (in-place) net operating income; not pro forma. (Benchmark field 'current_noi': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)",
-          "scope": "production"
-        },
-        "proforma_noi": {
-          "unit": "USD",
-          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.",
-          "scope": "reference"
-        },
-        "current_scheduled_gross_income": {
-          "unit": "USD",
-          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.",
-          "scope": "reference"
-        },
-        "proforma_scheduled_gross_income": {
-          "unit": "USD",
-          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.",
-          "scope": "reference"
+          "description": "Current (in-place) net operating income; not pro forma. (Benchmark field 'current_noi': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
         },
         "loan_amount": {
           "unit": "USD",
-          "description": "Loan amount stated for the deal (existing, proposed or modeled). (Benchmark field 'modeled_loan_amount': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)",
-          "scope": "production"
+          "description": "Loan amount stated for the deal (existing, proposed or modeled). (Benchmark field 'modeled_loan_amount': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
         },
         "interest_rate": {
           "unit": "ratio",
-          "description": "Interest rate of that loan as a ratio. (Benchmark field 'modeled_interest_rate': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)",
-          "scope": "production"
+          "description": "Interest rate of that loan as a ratio. (Benchmark field 'modeled_interest_rate': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
         },
-        "modeled_amortization_years": {
-          "unit": "years",
-          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.",
-          "scope": "reference"
-        },
-        "current_debt_coverage_ratio": {
-          "unit": "multiple",
-          "description": "Resolve current debt coverage ratio: if supplied sources disagree, report conflict with all distinct candidate values and their evidence.",
-          "scope": "reference"
-        },
-        "lp_preferred_return": {
-          "unit": "ratio",
-          "description": "lp preferred return. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
-        },
-        "lp_minimum_subscription": {
+        "annual_revenue": {
           "unit": "USD",
-          "description": "lp minimum subscription. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
+          "description": "Current annual revenue / gross income as stated. (Benchmark field 'current_scheduled_gross_income': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
         }
       }
     },
@@ -412,73 +109,35 @@
       "requested_fields": {
         "asking_price": {
           "unit": "USD",
-          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.",
-          "scope": "production"
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
         },
         "cap_rate": {
           "unit": "ratio",
-          "description": "Current (in-place) cap rate as a ratio; not pro forma. (Benchmark field 'current_cap_rate': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)",
-          "scope": "production"
+          "description": "Current (in-place) cap rate as a ratio; not pro forma. (Benchmark field 'current_cap_rate': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
         },
         "noi": {
           "unit": "USD",
-          "description": "Current (in-place) net operating income; not pro forma. (Benchmark field 'current_noi': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)",
-          "scope": "production"
+          "description": "Current (in-place) net operating income; not pro forma. (Benchmark field 'current_noi': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
         },
         "square_feet": {
           "unit": "sqft",
-          "description": "The property's stated size in square feet (building or rentable area). (Benchmark field 'rentable_area': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)",
-          "scope": "production"
+          "description": "The property's stated size in square feet (building or rentable area). (Benchmark field 'rentable_area': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
         },
         "occupancy_rate": {
           "unit": "ratio",
-          "description": "Current occupancy as a ratio (94% -> 0.94). (Benchmark field 'occupancy': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)",
-          "scope": "production"
+          "description": "Current occupancy as a ratio (94% -> 0.94). (Benchmark field 'occupancy': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
         },
         "loan_amount": {
           "unit": "USD",
-          "description": "Loan amount stated for the deal (existing, proposed or modeled). (Benchmark field 'modeled_loan_amount': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)",
-          "scope": "production"
-        },
-        "modeled_down_payment": {
-          "unit": "USD",
-          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.",
-          "scope": "reference"
+          "description": "Loan amount stated for the deal (existing, proposed or modeled). (Benchmark field 'modeled_loan_amount': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
         },
         "interest_rate": {
           "unit": "ratio",
-          "description": "Interest rate of that loan as a ratio. (Benchmark field 'modeled_interest_rate': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)",
-          "scope": "production"
+          "description": "Interest rate of that loan as a ratio. (Benchmark field 'modeled_interest_rate': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
         },
         "loan_term_years": {
           "unit": "years",
-          "description": "Loan term in years. (Benchmark field 'modeled_loan_term_years': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)",
-          "scope": "production"
-        },
-        "levered_irr": {
-          "unit": "ratio",
-          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.",
-          "scope": "reference"
-        },
-        "unlevered_irr": {
-          "unit": "ratio",
-          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.",
-          "scope": "reference"
-        },
-        "parking_spaces": {
-          "unit": "count",
-          "description": "parking spaces",
-          "scope": "reference"
-        },
-        "lp_preferred_return": {
-          "unit": "ratio",
-          "description": "lp preferred return. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
-        },
-        "lp_minimum_subscription": {
-          "unit": "USD",
-          "description": "lp minimum subscription. Extract only if supported by the supplied sources; otherwise report missing.",
-          "scope": "reference"
+          "description": "Loan term in years. (Benchmark field 'modeled_loan_term_years': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
         }
       }
     },
@@ -493,63 +152,27 @@
       "requested_fields": {
         "units": {
           "unit": "count",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "production"
-        },
-        "monthly_market_rent": {
-          "unit": "USD_per_month",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "reference"
-        },
-        "rent_growth": {
-          "unit": "ratio",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "reference"
-        },
-        "vacancy_credit_loss": {
-          "unit": "ratio",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "reference"
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
         },
         "ltv": {
           "unit": "ratio",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "production"
-        },
-        "unit_cost": {
-          "unit": "USD",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "reference"
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
         },
         "loan_amount": {
           "unit": "USD",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "production"
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
         },
         "interest_rate": {
           "unit": "ratio",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "production"
-        },
-        "year2026_noi": {
-          "unit": "USD",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "reference"
-        },
-        "year2026_free_cashflow": {
-          "unit": "USD",
-          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow.",
-          "scope": "reference"
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
         },
         "address": {
           "unit": "text",
-          "description": "Street address of the subject property. (Benchmark field 'property_address': property address. Extract only if supported by the supplied sources; otherwise report missing.)",
-          "scope": "production"
+          "description": "Street address of the subject property. (Benchmark field 'property_address': property address. Extract only if supported by the supplied sources; otherwise report missing.)"
         },
         "sponsor_name": {
           "unit": "text",
-          "description": "Sponsor's name. (Benchmark field 'sponsor_legal_name': sponsor legal name. Extract only if supported by the supplied sources; otherwise report missing.)",
-          "scope": "production"
+          "description": "Sponsor's name. (Benchmark field 'sponsor_legal_name': sponsor legal name. Extract only if supported by the supplied sources; otherwise report missing.)"
         }
       }
     }

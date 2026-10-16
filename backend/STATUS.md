@@ -80,21 +80,24 @@ top of `store.py`. There's no reviewer UI yet; correction happens by calling the
 
 ## 5. Ground-Truth Evaluation Set — ✅ Built, awaiting domain sign-off (M1.4)
 
-`backend/evaluation/benchmark_data/` holds a versioned ground-truth set of real deal packages: 96
-expected values across five deal families (Roderick, Opulent, Daly City, Chicago, Corporate Place)
-plus a workbook diagnostic (Townhomes). Expected values (`ground_truth/labels.json`) and evidence
+`backend/evaluation/benchmark_data/` holds a versioned ground-truth set of real deal packages: 26
+expected values so far across five deal families (Roderick, Opulent, Daly City, Chicago, Corporate
+Place) plus a workbook diagnostic (Townhomes). Expected values (`ground_truth/labels.json`) and evidence
 pages/cells (`ground_truth/evidence.json`) are stored separately from any extraction output, the
 source files are pinned by SHA-256 in `inputs/manifest.json`, and the sources themselves stay out of
 Git (restore them with `python -m backend.evaluation.restore_inputs`).
 
-Every field is `production` (named after a `REPEDealProfile` field, counted in the score) or
-`reference` (a labelled fact the extractor has no field for, reported separately). Version
-0.1.1-draft renamed equivalent fields to their profile names: 24 production, 72 reference.
+Every benchmark field is a field the extractor produces (`REPEDealProfile`, listed in
+`evaluation/fields.py`); the loader rejects anything else. Version 0.1.1-draft renamed equivalent
+fields to their profile names; 0.1.2-draft renamed two more (Opulent total keys -> `units`, Chicago
+current scheduled gross income -> `annual_revenue`) and removed the 70 labels for facts the
+extractor has no field for (preferred return, IRR, scenario costs...; they remain in Git history at
+0.1.1-draft if a profile field is added for one).
 
 **Still needed from people, not code:** every label is `pending_domain_review`. The domain team
-works through `ground_truth/review.csv`, checking the 96 labelled rows and filling the 114
-`to_label` rows: the H9N fields each deal has no answer for yet, which Roderick and Opulent need
-before the dev split measures much. Then they import it with `python -m
+works through `ground_truth/review.csv`, checking the 26 labelled rows and filling the 112
+`to_label` rows: the extractor fields each deal has no answer for yet. Roderick has none yet (it
+isn't scored until it does) and Opulent one. Then they import it with `python -m
 backend.evaluation.import_review --version 0.2.0` and commit. Until then, reports say
 `DRAFT_NOT_DOMAIN_APPROVED`.
 
@@ -110,8 +113,8 @@ python -m backend.evaluation.evaluate --allow-draft --out backend/evaluation/rep
 ```
 
 It reports field accuracy, missing-field detection, unsupported extraction rate, evidence-page
-correctness, latency, and approximate model cost (from `evaluation/pricing.json`), counting every
-production field (labelled facts the extractor has no field for are reported separately). `--compare
+correctness, latency, and approximate model cost (from `evaluation/pricing.json`) over every
+labelled field, plus `label_coverage` (how many of the extractor's fields are labelled). `--compare
 <earlier report.json>` lists what changed after a prompt or model change, `--provider`/`--model`
 switch between Anthropic and OpenRouter models, and `--predictions` replays a saved run for free.
 This calls the real model and costs money, so it's run by hand; the runner, scoring, dataset checks

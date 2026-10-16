@@ -20,6 +20,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from backend.evaluation.dataset import DEFAULT_ROOT, approved, load_dataset, read_json, sha256
+from backend.evaluation.fields import PRODUCTION_FIELDS
 from backend.evaluation.scoring import model_cost, ratio, score_case, summarize
 
 DEFAULT_ADAPTER = "backend.evaluation.hana_adapter:extract"
@@ -28,24 +29,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # --pricing isn't given so one command reports approximate cost. Unpriced
 # models stay unknown (null), never free; see evaluation/README.md.
 DEFAULT_PRICING = Path(__file__).parent / "pricing.json"
-# Reference-field metrics repeated in the flat metrics table.
-REFERENCE_METRICS = ("field_accuracy", "grounded_accuracy", "output_coverage")
 
 
 def unsupported_fields(pred: dict) -> set[str]:
-    """Fields the adapter declared it cannot express. A production-scope
-    field in this set is a mapping gap (reported), not a model error."""
+    """Fields the adapter declared it cannot express: a mapping gap
+    (reported), not a model error."""
     metadata = pred.get("metadata")
     names = metadata.get("unsupported_schema_fields") if isinstance(metadata, dict) else None
     return {n for n in names if isinstance(n, str)} if isinstance(names, list) else set()
-
-
-def production(rows: list[dict]) -> list[dict]:
-    return [r for r in rows if r["scope"] == "production"]
-
-
-def reference(rows: list[dict]) -> list[dict]:
-    return [r for r in rows if r["scope"] == "reference"]
 
 
 def unpriced_models(predictions: dict, pricing: dict) -> list[str]:
@@ -99,7 +90,7 @@ def validate_thresholds(rules: dict) -> None:
     allowed = set(summarize([])) - {"counts"}
     allowed |= {"macro_case_accuracy", "latency_mean_seconds", "latency_p95_seconds", "approx_model_cost_usd",
                 "known_partial_model_cost_usd", "cost_coverage", "latency_coverage", "case_error_rate", "unexpected_field_count",
-                "production_field_share", "mapping_gap_count"} | {"reference_" + name for name in REFERENCE_METRICS}
+                "label_coverage", "mapping_gap_count"}
     if not isinstance(rules, dict):
         raise ValueError("Thresholds must be a metric-to-rule object")
     for name, rule in rules.items():
@@ -115,9 +106,11 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         resume=None, on_prediction=None) -> tuple[dict, dict]:
     """`resume` reuses completed cases of an interrupted live run instead of
     paying for them again; `on_prediction` sees the predictions after every
-    case so a crash or Ctrl-C keeps what has been extracted so far."""
+    case so a crash or Ctrl-C keeps what has been extracted so far.
+    A case with no labelled fields yet has nothing to score, so it isn't
+    extracted (or paid for); it is listed in `unlabelled_cases`."""
     results, predictions, all_rows = [], {}, []
-    for case in cases:
+    for case in (case for case in cases if case["requested_fields"]):
         cid = case["case_id"]
         start = time.perf_counter()
         error = None
@@ -155,13 +148,10 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         scored = {"fields": {}} if error else pred
         rows, extras = score_case(scored, dataset.labels[cid], dataset.evidence[cid])
         unsupported = unsupported_fields(pred)
-        for row in rows:
-            row["scope"] = dataset.scope(cid, row["field"])
-        gaps = sorted(r["field"] for r in production(rows) if r["field"] in unsupported)
+        gaps = sorted(r["field"] for r in rows if r["field"] in unsupported)
         all_rows.extend(rows)
         partial_cost = model_cost(pred, pricing or {})
-        results.append({"case_id": cid, "metrics": summarize(production(rows)),
-                        "reference_metrics": summarize(reference(rows)), "mapping_gaps": gaps,
+        results.append({"case_id": cid, "metrics": summarize(rows), "mapping_gaps": gaps,
                         "latency_seconds": latency,
                         "approx_model_cost_usd": partial_cost if not error else None,
                         "known_partial_model_cost_usd": partial_cost,
@@ -170,10 +160,7 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         predictions[cid] = pred
         if on_prediction:
             on_prediction(predictions)
-    # Headline metrics count only production fields: what H9N's extractor is
-    # meant to produce. Reference fields (labelled facts with no profile
-    # field) are reported separately and never drag the score down.
-    metrics = summarize(production(all_rows))
+    metrics = summarize(all_rows)
     latencies = [r["latency_seconds"] for r in results if r["latency_seconds"] is not None]
     costs = [r["approx_model_cost_usd"] for r in results if r["approx_model_cost_usd"] is not None]
     partial = [r["known_partial_model_cost_usd"] for r in results if r["known_partial_model_cost_usd"] is not None]
@@ -188,15 +175,16 @@ def run(dataset, cases: list[dict], *, adapter=None, cached=None, pricing=None, 
         "case_error_rate": ratio(sum(r["error"] is not None for r in results), len(results)),
         "unexpected_field_count": sum(len(r["unexpected_fields"]) for r in results),
     })
-    reference_summary = summarize(reference(all_rows))
-    metrics["production_field_share"] = ratio(len(production(all_rows)), len(all_rows))
+    # Share of the extractor's fields, across every selected case, that have
+    # a label. Values on unlabelled fields aren't scored, so read accuracy
+    # and unsupported extraction together with this.
+    metrics["label_coverage"] = ratio(len(all_rows), len(cases) * len(PRODUCTION_FIELDS))
     metrics["mapping_gap_count"] = sum(len(r["mapping_gaps"]) for r in results)
-    metrics.update({"reference_" + name: reference_summary[name] for name in REFERENCE_METRICS})
     failures = [key for key, rule in (thresholds or {}).items()
                 if metrics.get(key) is None or ("min" in rule and metrics[key] < rule["min"])
                 or ("max" in rule and metrics[key] > rule["max"])]
-    return {"metrics": metrics, "reference_fields": reference_summary, "threshold_failures": failures,
-            "cases": results}, predictions
+    return {"metrics": metrics, "unlabelled_cases": [c["case_id"] for c in cases if not c["requested_fields"]],
+            "threshold_failures": failures, "cases": results}, predictions
 
 
 def compare(report: dict, baseline: dict) -> dict:
@@ -254,19 +242,21 @@ def write_report(out: Path, report: dict, predictions: dict) -> None:
         if key != "counts":
             lines.append(f"| {key} | {_fmt(value)} |")
     counts = report["metrics"].get("counts", {})
-    lines.append(f"\nScores count the {counts.get('fields', 0)} production fields (named after REPEDealProfile fields). "
-                 f"`reference_*` covers labelled facts the extractor has no field for; they never lower the score.")
+    lines.append(f"\nScores count the {counts.get('fields', 0)} labelled fields; `label_coverage` is the share of the "
+                 f"extractor's {len(PRODUCTION_FIELDS)} fields per case that have a label.")
+    if report.get("unlabelled_cases"):
+        lines.append(f"\nNot scored yet (no labelled fields; fill their to_label rows in review.csv): "
+                     f"{', '.join(report['unlabelled_cases'])}")
     gaps = [f"{c['case_id']}.{f}" for c in report["cases"] for f in c.get("mapping_gaps", [])]
     if gaps:
-        lines.append(f"\n**Mapping gaps** (production fields the adapter didn't map; scored as wrong): {', '.join(gaps)}")
+        lines.append(f"\n**Mapping gaps** (fields the adapter didn't map; scored as wrong): {', '.join(gaps)}")
     if report.get("unpriced_models"):
         lines.append(f"\nNo pricing for: {', '.join(report['unpriced_models'])}. Add rates with --pricing to report cost.")
-    lines += ["\n## Cases", "| Case | Production fields | Accuracy | Reference fields | Latency (s) | Model cost (USD) | Error |",
-              "|---|---:|---:|---:|---:|---:|---|"]
+    lines += ["\n## Cases", "| Case | Labelled fields | Accuracy | Latency (s) | Model cost (USD) | Error |",
+              "|---|---:|---:|---:|---:|---|"]
     for case in report["cases"]:
         lines.append(f"| {case['case_id']} | {case['metrics']['counts']['fields']} | {_fmt(case['metrics']['field_accuracy'])} | "
-                     f"{case['reference_metrics']['counts']['fields']} | {_fmt(case['latency_seconds'])} | "
-                     f"{_fmt(case['approx_model_cost_usd'])} | {_cell(case['error'] or '')} |")
+                     f"{_fmt(case['latency_seconds'])} | {_fmt(case['approx_model_cost_usd'])} | {_cell(case['error'] or '')} |")
     comparison = report.get("comparison")
     if comparison:
         lines += [f"\n## Compared with run {comparison['baseline_run_id']} ({comparison['baseline_model'] or 'model N/A'})"]
@@ -285,8 +275,8 @@ def write_report(out: Path, report: dict, predictions: dict) -> None:
             lines.append("\nNo field-level outcome changed.")
     lines += ["\n## Fields", "Expected values are answer keys: keep holdout reports out of prompt tuning."]
     for case in report["cases"]:
-        lines += [f"\n### {case['case_id']}", "| Field | Expected | Predicted | Value | Evidence | Scope |",
-                  "|---|---|---|:-:|:-:|:-:|"]
+        lines += [f"\n### {case['case_id']}", "| Field | Expected | Predicted | Value | Evidence |",
+                  "|---|---|---|:-:|:-:|"]
         for row in case["fields"]:
             exp, pred = row["expected"], row["prediction"]
             expected = exp["status"] if exp["status"] == "missing" else (
@@ -295,7 +285,7 @@ def write_report(out: Path, report: dict, predictions: dict) -> None:
                 pred.get("status") if pred.get("value") is None and not pred.get("candidates")
                 else pred.get("candidates") or pred.get("value"))
             lines.append(f"| {row['field']} | {_cell(expected)} | {_cell(predicted)} | {'✓' if row['value_correct'] else '✗'} | "
-                         f"{'✓' if row['evidence_correct'] else '✗'} | {row['scope']} |")
+                         f"{'✓' if row['evidence_correct'] else '✗'} |")
     lines += ["\n## Interpretation"] + ["- " + item for item in report["limitations"]]
     lines += ["\nThreshold failures: " + (", ".join(report["threshold_failures"]) or "none / no thresholds supplied")]
     (out / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -330,6 +320,9 @@ def main(argv=None) -> int:
     try:
         dataset = load_dataset(args.dataset)
         cases = dataset.select(args.split)
+        labelled = [case for case in cases if case["requested_fields"]]
+        if not labelled:
+            parser.error(f"No {args.split} case has a labelled field yet: fill its to_label rows in review.csv.")
         is_approved = all(approved(g) for case in cases for g in dataset.labels[case["case_id"]].values())
         if not is_approved and not args.allow_draft:
             parser.error("Labels await domain approval; use --allow-draft for provisional reports.")
@@ -350,7 +343,7 @@ def main(argv=None) -> int:
             raise ValueError("--resume needs a predictions.json written by this command")
         adapter, adapter_name = None, args.adapter or DEFAULT_ADAPTER
         if not args.predictions:
-            dataset.verify_sources(cases)
+            dataset.verify_sources(labelled)  # unlabelled cases aren't extracted
             module, name = adapter_name.rsplit(":", 1)
             adapter = getattr(importlib.import_module(module), name)
             if not callable(adapter):
@@ -389,7 +382,8 @@ def main(argv=None) -> int:
     report, predictions = run(dataset, cases, adapter=adapter, cached=cached, pricing=pricing, thresholds=thresholds,
                               resume=resume, on_prediction=save_progress)
     report.update({
-        "run_id": run_id, "resumed_cases": sorted(c["case_id"] for c in cases if adapter and resumable(resume, c["case_id"])),
+        "run_id": run_id, "resumed_cases": sorted(c["case_id"] for c in report["cases"]  # unlabelled cases aren't run
+                                                  if adapter and resumable(resume, c["case_id"])),
         "dataset_version": dataset.version, "split": args.split,
         "label_status": "domain_approved" if is_approved else "DRAFT_NOT_DOMAIN_APPROVED",
         "run_kind": "live_adapter" if adapter else "saved_predictions", "adapter": adapter_name if adapter else None,
@@ -401,14 +395,13 @@ def main(argv=None) -> int:
         "predictions_source_sha256": sha256(args.predictions) if args.predictions else None,
         "limitations": [
             "Draft labels are provisional until the domain team approves them; holdout novelty needs team confirmation.",
+            "Only labelled fields are scored; label_coverage says how much of the extractor's output that is.",
             "Reference disagreement is a proxy for unsupported extraction, not a semantic entailment judgment.",
             "Evidence scoring checks exact physical PDF pages or workbook cells, not quote entailment.",
             "Omitted fields and failed cases are scored as failures, not successful missing detections.",
             "Latency includes parsing/extraction; replay uses saved latency. p95 is unstable for small sets.",
             "Cost uses reported model tokens and supplied rates; unknown cost is null. Failed-run cost is partial.",
             "Reports contain answer keys; keep holdout reports outside prompt tuning and retrieval indexes.",
-            "Headline metrics cover production fields only; reference_* fields are labelled facts H9N has no field for.",
-            "Few production fields are labelled until the domain team fills the to_label rows in review.csv.",
         ],
     })
     if baseline is not None:

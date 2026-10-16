@@ -2,7 +2,8 @@
 
 ## What is implemented
 
-- Integrated 96 checks across five deal families and a separate workbook diagnostic.
+- 26 labelled fields (112 more to label) across five deal families and a separate
+  workbook diagnostic.
 - Development cases: Roderick, Opulent, and Daly City. Reserved cases: Chicago
   and Corporate Place. Townhomes is the workbook diagnostic.
 - Versioned case definitions, source hashes, labels, separate evidence, and a
@@ -16,9 +17,8 @@
 - Mean/p95 latency and model cost accounting across returned model responses,
   including schema-repair attempts.
 - Saved-output replay, metric thresholds, dataset validation, and split checks.
-- Every field has a scope. `production` fields are named after a
-  `REPEDealProfile` field and are what the score counts; `reference` fields
-  are labelled facts the extractor has no field for, reported separately.
+- Every benchmark field is a `REPEDealProfile` field the extractor produces
+  (`fields.py`); the loader rejects anything else.
 - `--compare` against an earlier run: metric deltas and per-field flips.
 - Default list-price pricing for the default models (`pricing.json`).
 - Reports with run IDs, dataset/source hashes, Git revision, package versions,
@@ -62,21 +62,21 @@ OpenRouter (or the reverse).
 
 ## Read the metrics
 
-The score counts **production** fields only: fields named after a
-`REPEDealProfile` field (listed in `fields.py`), in that field's unit. The
-loader rejects a production field the extractor doesn't produce, so the test
-and the extractor can't drift apart. Everything else is a **reference** field,
-a labelled fact the extractor has no place for (for example
-`lot15_pitch_land_cost` or `proforma_noi`). Reference fields appear as
-`reference_*` metrics and in the per-field table, and never lower the score.
-`production_field_share` is the fraction of labelled fields that count, and
-`mapping_gap_count` flags a production field the adapter failed to map.
+Every benchmark field is a `REPEDealProfile` field (listed in `fields.py`),
+in that field's unit, and the loader rejects anything else, so the test and
+the extractor can't drift apart (a test also fails if the profile gains a
+field `fields.py` doesn't list). Only labelled fields are scored:
+`label_coverage` is the share of the extractor's 23 fields per deal that have
+a label, and a deal with none yet is listed as not scored and isn't
+extracted. `mapping_gap_count` flags a field the adapter failed to map.
 
-Dataset 0.1.1-draft has 24 production fields and 72 reference fields.
-Equivalent fields were renamed to their profile names (for example
-`current_noi` → `noi`, `rentable_area` → `square_feet`), with a review note on
-each rename. Values were not changed. The dev split has only 4 production
-fields (Daly City) until the domain team labels the `to_label` rows (see
+Dataset 0.1.2-draft has 26 labelled fields. Equivalent fields were renamed to
+their profile names (for example `current_noi` → `noi`, `total_keys` →
+`units`), with a review note on each rename; values were not changed. The 70
+labels for facts the extractor has no field for (such as `proforma_noi` or
+`lot15_pitch_land_cost`) were removed; they are in Git history at 0.1.1-draft
+if a profile field is added for one. The dev split scores 5 fields (Daly
+City, Opulent) until the domain team labels the `to_label` rows (see
 [Domain review](#domain-review)).
 
 ## Evaluate models with OpenRouter
@@ -160,34 +160,40 @@ one row per question:
   answer against the document and fix it if needed.
   - `status`: `present`, `missing` (the documents don't state it), or
     `conflict` (they state different values; put every value in `candidates`).
-  - `expected_value`: a number in base units (`2100000`, ratios like `0.0587`
-    for 5.87%), quoted text (`"Multifamily"`), or `null` for missing/conflict.
-  - `evidence`: the page(s) it's on, such as `[{"document_id": "daly_city", "page": 3}]`.
+  - `expected_value`: the value as the spreadsheet shows it: `2100000` or
+    `$2,100,000`, `5.87%` or `0.0587` for ratio fields, plain text
+    (`Multifamily`). Leave it blank for missing/conflict.
+  - `candidates` (conflicts only): every stated value, such as `1.41; 1.43`.
+  - `evidence`: the page(s) it's on, such as `daly_city p3; daly_city p9`, or
+    a workbook cell, `townhomes_model Sheet1!N15`. Document IDs are each
+    case's `documents` in `inputs/cases.json`.
   - When it's right, set `review_status` to `approved` and fill in `reviewer`
-    and `reviewed_at` (`2026-10-20`).
-- **`to_label` rows**: H9N production fields a deal has no answer for yet
+    and `reviewed_at` (`2026-10-20`; keep the column as text so a spreadsheet
+    doesn't reformat the date).
+- **`to_label` rows**: extractor fields a deal has no answer for yet
   (property type, NOI, cap rate, sponsor…). These decide how much the score
-  measures, especially for Roderick and Opulent. Fill in `status`,
-  `expected_value` and `evidence`, then set `review_status` to
+  measures: Roderick isn't scored at all until one is filled. Fill in
+  `status`, `expected_value` and `evidence`, then set `review_status` to
   `pending_domain_review` or `approved`. Leave a row as `to_label` to skip it.
-- `description` says what each question means. `scope` says whether it
-  counts in the score (`production`) or not (`reference`).
+- `description` says what each question means, and `unit` what the value is
+  measured in.
 
-Then validate, import with a new version, and commit the changed files:
+Then validate, import with a new version, and commit:
 
 ```bash
 python -m backend.evaluation.import_review --version 0.2.0 --check   # dry run, writes nothing
 python -m backend.evaluation.import_review --version 0.2.0
-python -m backend.evaluation.export_review                           # refresh review.csv
 git add backend/evaluation/benchmark_data && git commit -m "M1.4: domain-reviewed labels v0.2.0"
 ```
 
-The importer validates the whole worksheet before writing anything. An error
-names the spreadsheet line and field. The import never approves rows by
-itself, and new fields named after profile fields are added as production
-fields. Once every label is approved, run the evaluation without
-`--allow-draft`. A CI test fails if `review.csv` and the JSON files drift
-apart, so always re-export after an import.
+The importer validates the whole worksheet before writing anything, including
+that each value fits its unit (a ratio typed as `5.87` is rejected). An
+error names the spreadsheet line or the case and field. The import never
+approves rows by itself, and only extractor fields can be added. It rewrites
+`review.csv` in its canonical form, so a CI test comparing it with the JSON
+files keeps passing; run `export_review` only after editing the JSON by hand.
+In Excel, save as **CSV UTF-8**. Once every label is approved, run the
+evaluation without `--allow-draft`.
 
 ## Replay saved predictions
 

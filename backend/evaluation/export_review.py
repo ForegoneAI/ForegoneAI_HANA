@@ -2,23 +2,23 @@
 
     python -m backend.evaluation.export_review
 
-One row per labelled field, plus a `to_label` row for every H9N production
-field (fields.py) a case doesn't have a label for yet, so the domain team can
-add the answers the extractor is actually scored on. Reviewers edit the CSV
-and import it with import_review.py; this command only regenerates it (for
-example after an import, or after a dataset change made in the JSON files).
-It never reads extraction output.
+One row per labelled field, plus a `to_label` row for every extractor field
+(fields.py) a case doesn't have a label for yet, so the domain team can add
+the answers the extractor is scored on. Reviewers edit the CSV and import it
+with import_review.py, which rewrites it; run this only after editing the
+JSON files by hand. Cells use worksheet.py's format. It never reads
+extraction output.
 """
 
 import argparse
 import csv
-import json
 from pathlib import Path
 
 from backend.evaluation.dataset import DEFAULT_ROOT, load_dataset
 from backend.evaluation.fields import PRODUCTION_FIELDS
+from backend.evaluation.worksheet import format_candidates, format_locations, format_value
 
-COLUMNS = ["case_id", "field", "scope", "description", "review_status", "status", "expected_value", "unit",
+COLUMNS = ["case_id", "field", "description", "review_status", "status", "expected_value", "unit",
            "candidates", "abs_tolerance", "evidence", "review_note", "reviewer", "reviewed_at"]
 TO_LABEL = "to_label"
 
@@ -31,19 +31,19 @@ def review_rows(root: Path) -> list[dict]:
         for name, spec in case["requested_fields"].items():
             gold, ev = dataset.labels[cid][name], dataset.evidence[cid][name]
             rows.append({
-                "case_id": cid, "field": name, "scope": spec["scope"], "description": spec["description"],
+                "case_id": cid, "field": name, "description": spec["description"],
                 "review_status": gold["review_status"], "status": gold["status"],
-                "expected_value": json.dumps(gold["value"]), "unit": gold["unit"],
-                "candidates": json.dumps(gold.get("candidates")), "abs_tolerance": json.dumps(gold["abs_tolerance"]),
-                "evidence": json.dumps(ev["locations"]), "review_note": ev.get("review_note") or "",
+                "expected_value": format_value(gold["value"]), "unit": gold["unit"],
+                "candidates": format_candidates(gold.get("candidates")), "abs_tolerance": format_value(gold["abs_tolerance"]),
+                "evidence": format_locations(ev["locations"]), "review_note": ev.get("review_note") or "",
                 "reviewer": gold.get("reviewer") or "", "reviewed_at": gold.get("reviewed_at") or "",
             })
         for name, (unit, description) in PRODUCTION_FIELDS.items():
             if name not in case["requested_fields"]:
                 rows.append({
-                    "case_id": cid, "field": name, "scope": "production", "description": description,
+                    "case_id": cid, "field": name, "description": description,
                     "review_status": TO_LABEL, "status": "", "expected_value": "", "unit": unit,
-                    "candidates": "null", "abs_tolerance": "0", "evidence": "[]", "review_note": "",
+                    "candidates": "", "abs_tolerance": "0", "evidence": "", "review_note": "",
                     "reviewer": "", "reviewed_at": "",
                 })
     return rows
@@ -70,7 +70,7 @@ def main(argv=None) -> int:
     except (OSError, ValueError, KeyError) as exc:
         parser.error(str(exc))
     todo = sum(r["review_status"] == TO_LABEL for r in rows)
-    print(f"Wrote {len(rows)} rows: {len(rows) - todo} labelled, {todo} production fields to label.")
+    print(f"Wrote {len(rows)} rows: {len(rows) - todo} labelled, {todo} fields to label.")
     return 0
 
 

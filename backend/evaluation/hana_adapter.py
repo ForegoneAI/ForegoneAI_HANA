@@ -1,8 +1,8 @@
 """Evaluate the existing production PDF extractor without database writes.
 
-Only benchmark fields named after a REPEDealProfile field are mapped (see
+Benchmark fields are named after the REPEDealProfile field they test (see
 fields.py): generic `noi` is never stretched over both current and pro-forma
-NOI, and square_feet never stands for lot area. Other fields are reference.
+NOI, and square_feet never stands for lot area.
 The adapter never imports labels/evidence or introduces a benchmark prompt.
 """
 

@@ -292,9 +292,9 @@ python -m backend.evaluation.evaluate --allow-draft --compare backend/evaluation
 ```
 
 The report covers field accuracy, missing-field detection, unsupported (hallucinated) extraction
-rate, evidence-page correctness, latency, and approximate model cost. The score counts only the
-fields H9N's extractor produces; labelled facts it has no field for are reported separately as
-`reference`. `--compare` shows what changed since an earlier run, so it can be rerun after any prompt or model change. The reserved
+rate, evidence-page correctness, latency, and approximate model cost. Every benchmark field is a
+field H9N's extractor produces (`evaluation/fields.py`), and `label_coverage` says how many of them
+are labelled. `--compare` shows what changed since an earlier run, so it can be rerun after any prompt or model change. The reserved
 cases need `--split holdout --unlock-holdout`; labels stay drafts (`--allow-draft`) until the domain
 team approves them through `review.csv`, which also lists the H9N fields each deal still needs an
 answer for. See [evaluation/README.md](evaluation/README.md) for restoring source files, domain

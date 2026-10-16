@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from backend.evaluation.fields import PRODUCTION_FIELDS, SCOPES, default_scope
+from backend.evaluation.fields import PRODUCTION_FIELDS, check_value
 from backend.evaluation.scoring import location_key
 
 DEFAULT_ROOT = Path(__file__).parent / "benchmark_data"
@@ -82,10 +82,6 @@ class Dataset:
             if sha256(path) != doc["sha256"]:
                 raise ValueError(f"Source checksum mismatch: {did}")
 
-    def scope(self, cid: str, name: str) -> str:
-        case = next(c for c in self.cases if c["case_id"] == cid)
-        return case["requested_fields"][name]["scope"]
-
     def payload(self, case: dict) -> dict:
         # Explicit allowlist rather than copying arbitrary dataset properties:
         # future review notes/expected values cannot accidentally reach the LLM.
@@ -131,7 +127,9 @@ def load_dataset(root: Path = DEFAULT_ROOT) -> Dataset:
         families[family] = split
         if not case["documents"] or len(set(case["documents"])) != len(case["documents"]):
             raise ValueError(f"{cid}: Case needs unique source document IDs")
-        if not case["requested_fields"] or set(case["requested_fields"]) != set(labels[cid]) or set(labels[cid]) != set(evidence[cid]):
+        # A case may have no labelled fields yet: its documents and split are
+        # still pinned for the leakage checks, and the runner skips it.
+        if set(case["requested_fields"]) != set(labels[cid]) or set(labels[cid]) != set(evidence[cid]):
             raise ValueError(f"{cid}: Field/evidence schema mismatch")
         for did in case["documents"]:
             digest = documents[did]["sha256"]
@@ -147,22 +145,22 @@ def load_dataset(root: Path = DEFAULT_ROOT) -> Dataset:
                     raise ValueError("Invalid label status")
                 if not isinstance(gold.get("unit"), str) or not gold["unit"] or gold["unit"] != case["requested_fields"][name]["unit"]:
                     raise ValueError("Label/spec unit mismatch")
-                spec = case["requested_fields"][name]
-                spec.setdefault("scope", default_scope(name))
-                if spec["scope"] not in SCOPES:
-                    raise ValueError("Scope must be production or reference")
-                # Production fields are what the headline score counts, so
-                # they must be exactly something the extractor produces.
-                if spec["scope"] == "production" and PRODUCTION_FIELDS.get(name, (None,))[0] != spec["unit"]:
-                    raise ValueError("Production fields must be named after a REPEDealProfile field (fields.py), in its unit")
+                # Every field is scored, so it must be exactly something the
+                # extractor produces.
+                if PRODUCTION_FIELDS.get(name, (None,))[0] != gold["unit"]:
+                    raise ValueError("Benchmark fields must be REPEDealProfile fields (fields.py), in their unit")
                 if type(tolerance) not in (int, float) or not math.isfinite(tolerance) or tolerance < 0:
                     raise ValueError("Invalid tolerance")
-                if status == "present" and (value is None or gold.get("candidates")):
-                    raise ValueError("Present label requires value and no candidates")
+                if status == "present":
+                    if value is None or gold.get("candidates"):
+                        raise ValueError("Present label requires value and no candidates")
+                    check_value(value, gold["unit"])
                 if status == "conflict":
                     candidates = gold.get("candidates")
                     if value is not None or not isinstance(candidates, list) or len(candidates) < 2 or any(v is None for v in candidates):
                         raise ValueError("Conflict requires null value and multiple candidates")
+                    for candidate in candidates:
+                        check_value(candidate, gold["unit"])
                 if status == "missing" and (value is not None or locs or gold.get("candidates")):
                     raise ValueError("Malformed missing label")
                 if not isinstance(locs, list) or (status != "missing" and not locs):
@@ -180,7 +178,7 @@ def load_dataset(root: Path = DEFAULT_ROOT) -> Dataset:
                 if gold["review_status"] == "approved" and not approved(gold):
                     raise ValueError("Approval requires reviewer and ISO review date")
             except (ValueError, KeyError, TypeError) as exc:
-                # Name the row, so a bad edit in a 96-row review is easy to find.
+                # Name the row, so a bad edit in a long review is easy to find.
                 raise ValueError(f"{cid}.{name}: {exc}") from None
 
     return Dataset(root, config["dataset_version"], cases, documents, labels, evidence)
