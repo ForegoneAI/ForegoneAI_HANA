@@ -1,27 +1,13 @@
-"""
-evaluate.py
+"""M1.4/M1.5 benchmark entry point and legacy synthetic scoring helpers.
 
-H9N Milestone 1, item 6 - Extraction Evaluation (scoring the cases defined
-in cases.py: item 5's ground truth and item 7's holdout set).
-
-For each case, runs the real extractor (extract_repe_deal) and compares
-every field in the case's `expected` dict against what came back, field by
-field. This calls the real Claude API, so - unlike the rest of the test
-suite - it needs a real ANTHROPIC_API_KEY and costs a little money to run;
-that's why it's a standalone script rather than part of `pytest`, which
-must stay free and key-less for CI (see test_evaluate.py for what IS
-covered by the automated, mocked test suite: the scoring logic itself).
-
-Usage:
-    export ANTHROPIC_API_KEY=sk-ant-...
-    python -m backend.evaluation.evaluate                 # ground truth only
-    python -m backend.evaluation.evaluate --holdout        # holdout only
-    python -m backend.evaluation.evaluate --all            # both, reported separately
+Run: python -m backend.evaluation.evaluate --allow-draft
+See backend/evaluation/README.md for review, replay, holdout, and cost options.
+Synthetic helpers are retained for existing unit tests only; the CLI routes to
+benchmark.py and uses source snapshots with separately versioned answer keys.
 """
 
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -148,29 +134,16 @@ def format_report(results: list[CaseResult], *, label: str) -> str:
     return "\n".join(lines)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--holdout",
-        action="store_true",
-        help="Evaluate the holdout set (item 7) instead of the ground-truth set (item 5).",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Evaluate both the ground-truth and holdout sets, reported separately.",
-    )
-    args = parser.parse_args()
+def main() -> int:
+    """The public command now evaluates the real M1.4 dataset.
 
-    if args.all:
-        print(format_report(run_evaluation(GROUND_TRUTH_CASES), label="Ground truth (item 5)"))
-        print()
-        print(format_report(run_evaluation(HOLDOUT_CASES), label="Holdout / unseen-deal (item 7)"))
-    elif args.holdout:
-        print(format_report(run_evaluation(HOLDOUT_CASES), label="Holdout / unseen-deal (item 7)"))
-    else:
-        print(format_report(run_evaluation(GROUND_TRUTH_CASES), label="Ground truth (item 5)"))
+    Legacy synthetic scoring helpers above remain available to the existing
+    unit tests; they do not establish performance on real deal packages.
+    """
+    from backend.evaluation.benchmark import main as benchmark_main
+
+    return benchmark_main()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

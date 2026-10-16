@@ -1,0 +1,824 @@
+"""Benchmark integration tests stay offline and need no confidential inputs.
+
+They verify leakage/approval guards, scoring denominators, production adapter
+behavior, usage accounting, replay, and safe review imports, not model quality.
+"""
+
+import copy
+import csv
+import json
+import zipfile
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from backend.app.h9n.extraction.repe_extractor import extract_repe_deal
+from backend.app.h9n.extraction.telemetry import capture_model_usage
+from backend.app.h9n.schemas.base_deal import WithheldValue
+from backend.app.h9n.schemas.repe_deal import REPEDealProfile
+from backend.evaluation import hana_adapter
+from backend.evaluation.benchmark import main, run, validate_thresholds
+from backend.evaluation.dataset import DEFAULT_ROOT, load_dataset, sha256
+from backend.evaluation.import_review import import_review
+from backend.evaluation.scoring import model_cost, value_correct
+from backend.evaluation.restore_inputs import restore
+from backend.evaluation.worksheet import format_locations, format_value, parse_locations, parse_value
+from backend.tests.extraction_fakes import evidence, fake_client, full_output, tool_response
+
+
+@pytest.fixture
+def dataset_root(tmp_path):
+    """A tiny independent dataset exercises the runner without source PDFs."""
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "ground_truth").mkdir()
+    source = tmp_path / "inputs/example.pdf"
+    source.write_bytes(b"source snapshot for checksum testing")
+    fields = {"asking_price": {"unit": "USD", "description": "Subject asking price"},
+              "cap_rate": {"unit": "ratio", "description": "Current cap rate, if stated"}}
+    cases = [{"case_id": "example", "family_id": "example", "split": "dev", "kind": "deal_package",
+              "documents": ["example_doc"], "requested_fields": fields}]
+    gold = {
+        "asking_price": {"status": "present", "value": 100, "unit": "USD", "abs_tolerance": 0,
+                         "review_status": "pending_domain_review", "reviewer": None, "reviewed_at": None},
+        "cap_rate": {"status": "missing", "value": None, "unit": "ratio", "abs_tolerance": 0,
+                      "review_status": "pending_domain_review", "reviewer": None, "reviewed_at": None},
+    }
+    files = {
+        "inputs/cases.json": {"dataset_version": "draft", "cases": cases},
+        "inputs/manifest.json": [{"document_id": "example_doc", "path": "inputs/example.pdf", "sha256": sha256(source)}],
+        "ground_truth/labels.json": {"dataset_version": "draft", "cases": {"example": gold}},
+        "ground_truth/evidence.json": {"example": {
+            "asking_price": {"locations": [{"document_id": "example_doc", "page": 3}]}, "cap_rate": {"locations": []}}},
+    }
+    for name, payload in files.items():
+        (tmp_path / name).write_text(json.dumps(payload))
+    return tmp_path
+
+
+def predictions():
+    return {"example": {"fields": {
+        "asking_price": {"status": "present", "value": 100, "unit": "USD", "evidence": [{"document_id": "example_doc", "page": 3}]},
+        "cap_rate": {"status": "missing", "value": None, "unit": "ratio", "evidence": []},
+    }, "latency_seconds": 2.5, "execution_kind": "local_no_model", "usage": []}}
+
+
+def edit(root, path, change):
+    target = root / path
+    data = json.loads(target.read_text())
+    change(data)
+    target.write_text(json.dumps(data))
+
+
+def test_pack_metadata_has_five_families_and_two_reserved_cases():
+    data = load_dataset()
+    assert len(data.cases) == 6
+    # At least: the domain review adds labels, and an import can't remove one.
+    assert sum(len(fields) for fields in data.labels.values()) >= 26
+    assert len(data.select("holdout")) == 2
+    assert len({c["family_id"] for c in data.cases if c["split"] != "diagnostic"}) == 5
+    # Draft until the domain team signs off through import_review.py; once
+    # rows are approved this still holds, so CI doesn't block the review.
+    assert all(g["review_status"] in ("pending_domain_review", "approved") for fs in data.labels.values() for g in fs.values())
+
+
+def test_payload_is_blind_and_uses_absolute_paths(dataset_root):
+    dataset = load_dataset(dataset_root)
+    case = dataset.cases[0]
+    case["expected"] = {"asking_price": 100}
+    case["requested_fields"]["asking_price"]["review_note"] = "answer here"
+    payload = dataset.payload(case)
+    assert "expected" not in payload
+    assert "review_note" not in payload["requested_fields"]["asking_price"]
+    assert Path(payload["documents"][0]["path"]).is_absolute()
+    payload["requested_fields"]["asking_price"]["unit"] = "bad"
+    assert case["requested_fields"]["asking_price"]["unit"] == "USD"
+
+
+def test_source_checksums_and_path_containment(dataset_root):
+    dataset = load_dataset(dataset_root)
+    dataset.verify_sources(dataset.cases)
+    (dataset_root / "inputs/example.pdf").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        dataset.verify_sources(dataset.cases)
+    edit(dataset_root, "inputs/manifest.json", lambda m: m[0].update(path="../../outside.pdf"))
+    with pytest.raises(ValueError, match="outside benchmark"):
+        load_dataset(dataset_root)
+
+
+@pytest.mark.parametrize("shared_family", [True, False])
+def test_family_and_duplicate_hash_split_leakage(dataset_root, shared_family):
+    def add_case(config):
+        case = copy.deepcopy(config["cases"][0])
+        case.update(case_id="holdout", split="holdout", family_id="example" if shared_family else "different")
+        config["cases"].append(case)
+    edit(dataset_root, "inputs/cases.json", add_case)
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"].update(holdout=copy.deepcopy(g["cases"]["example"])))
+    edit(dataset_root, "ground_truth/evidence.json", lambda e: e.update(holdout=copy.deepcopy(e["example"])))
+    with pytest.raises(ValueError, match="split leakage"):
+        load_dataset(dataset_root)
+
+
+def test_cli_draft_and_holdout_guard_run_before_extraction(dataset_root):
+    with pytest.raises(SystemExit) as draft:
+        main(["--dataset", str(dataset_root)])
+    assert draft.value.code == 2
+    with pytest.raises(SystemExit) as holdout:
+        main(["--dataset", str(dataset_root), "--split", "holdout", "--allow-draft"])
+    assert holdout.value.code == 2
+
+
+def test_replay_preserves_latency_and_reports_metrics_without_raw_inputs(dataset_root):
+    (dataset_root / "inputs/example.pdf").unlink()
+    pred_file = dataset_root / "predictions.json"
+    pred_file.write_text(json.dumps(predictions()))
+    output = dataset_root / "output"
+    assert main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft", "--out", str(output)]) == 0
+    report = json.loads((output / "report.json").read_text())
+    saved = json.loads((output / "predictions.json").read_text())
+    assert report["metrics"]["grounded_accuracy"] == 1
+    assert report["metrics"]["latency_mean_seconds"] == 2.5
+    assert report["metrics"]["approx_model_cost_usd"] == 0
+    assert saved["example"]["latency_seconds"] == 2.5
+    assert report["label_status"] == "DRAFT_NOT_DOMAIN_APPROVED"
+    assert "git_commit" in report["provenance"]
+    assert (output / "report.md").is_file()
+
+
+def test_errors_and_omissions_cannot_improve_denominators(dataset_root):
+    dataset = load_dataset(dataset_root)
+    report, _ = run(dataset, dataset.cases, cached={})
+    assert report["metrics"]["case_error_rate"] == 1
+    assert report["metrics"]["field_accuracy"] == 0
+    assert report["metrics"]["missing_detection_recall"] == 0
+    assert report["metrics"]["approx_model_cost_usd"] is None
+    partial = predictions()
+    partial["example"]["error"] = "provider failed after partial extraction"
+    report, _ = run(dataset, dataset.cases, cached=partial)
+    assert report["metrics"]["field_accuracy"] == 0
+
+
+def test_live_latency_is_saved_for_replay(dataset_root):
+    dataset = load_dataset(dataset_root)
+    report, saved = run(dataset, dataset.cases, adapter=lambda c: predictions()["example"])
+    replay, _ = run(dataset, dataset.cases, cached=saved)
+    assert replay["metrics"]["latency_mean_seconds"] == report["metrics"]["latency_mean_seconds"]
+
+
+def test_failed_threshold_and_schema_extra_exit_nonzero(dataset_root):
+    pred = predictions()
+    pred["example"]["fields"]["unexpected"] = {"value": 123}
+    pred_file = dataset_root / "predictions.json"
+    pred_file.write_text(json.dumps(pred))
+    threshold_file = dataset_root / "gates.json"
+    threshold_file.write_text(json.dumps({"unexpected_field_count": {"max": 0}, "conflict_accuracy": {"min": 1}}))
+    output = dataset_root / "out"
+    assert main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft",
+                 "--thresholds", str(threshold_file), "--out", str(output)]) == 1
+    report = json.loads((output / "report.json").read_text())
+    assert set(report["threshold_failures"]) == {"unexpected_field_count", "conflict_accuracy"}
+
+
+@pytest.mark.parametrize("rules", [{"typo": {"min": 1}}, {"field_accuracy": {}}, {"field_accuracy": {"min": True}},
+                                  {"field_accuracy": {"min": 1, "max": 0}}])
+def test_invalid_thresholds_fail_before_model_call(rules):
+    with pytest.raises(ValueError):
+        validate_thresholds(rules)
+
+
+def test_conflict_requires_explicit_null():
+    gold = {"status": "conflict", "value": None, "candidates": [100, 200], "unit": "USD", "abs_tolerance": 0}
+    assert not value_correct({"status": "conflict", "candidates": [100, 200], "unit": "USD"}, gold)
+
+
+def test_usage_capture_counts_repair_attempts_and_resets():
+    first = tool_response({"asking_price": "bad"})
+    second = tool_response(full_output())
+    for response in (first, second):
+        response.model = "test-model"
+        response.usage = SimpleNamespace(input_tokens=10, output_tokens=5, cache_read_input_tokens=4, cache_creation_input_tokens=2)
+    with capture_model_usage() as calls:
+        extract_repe_deal([{"file_name": "fixture.pdf", "page_number": 1, "text": "No financial terms are stated."}],
+                          client=fake_client(first, second))
+    assert len(calls) == 2
+    assert calls[0]["input_tokens"] == 16
+    assert calls[0]["cached_input_tokens"] == 4
+    rates = {"test-model": {"input_per_million": 2, "cached_input_per_million": 1,
+                             "cache_creation_input_per_million": 3, "output_per_million": 4}}
+    assert model_cost({"usage": calls}, rates) == pytest.approx(.0001)
+    with capture_model_usage() as fresh:
+        assert fresh == []
+    assert len(calls) == 2
+
+
+def test_unknown_or_malformed_usage_is_unknown_cost():
+    for call in (None, {"model": []}, {"model": "x", "input_tokens": True, "output_tokens": 1}):
+        assert model_cost({"usage": [call]}, {}) is None
+
+
+def test_real_adapter_uses_production_integrity_and_page_identity(monkeypatch):
+    pages = [{"file_name": "fixture.pdf", "page_number": 3, "text": "Asking price: $100.00"}]
+    monkeypatch.setattr(hana_adapter, "read_pdf", lambda p: pages)
+    response = tool_response(full_output(asking_price=100, evidence=[evidence("asking_price", 100, "Asking price: $100.00", page_number=3)]))
+    response.usage = SimpleNamespace(input_tokens=10, output_tokens=5)
+    case = {"documents": [{"document_id": "d", "path": "/local/fixture.pdf"}],
+            "requested_fields": {"asking_price": {"unit": "USD"}, "lp_return": {"unit": "ratio"}}}
+    result = hana_adapter.extract(case, client=fake_client(response))
+    assert result["fields"]["asking_price"]["value"] == 100
+    assert result["fields"]["asking_price"]["evidence"] == [{"document_id": "d", "page": 3}]
+    assert "lp_return" not in result["fields"]
+    assert result["usage"][0]["output_tokens"] == 5
+    assert len(result["metadata"]["input_sha256"]) == 64
+
+
+def test_withheld_and_incomplete_scope_are_never_missing():
+    profile = REPEDealProfile(withheld_values=[WithheldValue(field_name="asking_price", proposed_value=100,
+                               reason="model_conflicting", detail="Two prices")])
+    case = {"documents": [], "requested_fields": {"asking_price": {"unit": "USD"}, "units": {"unit": "count"}}}
+    fields = hana_adapter.profile_fields(profile, case, incomplete_scope=True)
+    assert fields["asking_price"]["status"] == "conflict"
+    assert "candidates" not in fields["asking_price"]
+    assert fields["units"]["status"] == "uncertain"
+    profile = REPEDealProfile(uncertain_information=["units: ambiguous count"])
+    assert hana_adapter.profile_fields(profile, case, incomplete_scope=False)["units"]["status"] == "uncertain"
+
+
+def test_percent_normalization_without_scenario_aliases():
+    profile = REPEDealProfile(occupancy_rate=94, noi=100, square_feet=5000)
+    case = {"documents": [], "requested_fields": {"occupancy_rate": {"unit": "ratio"}, "current_noi": {"unit": "USD"},
+                                                   "occupancy": {"unit": "ratio"}, "rentable_area": {"unit": "sqft"}}}
+    fields = hana_adapter.profile_fields(profile, case, incomplete_scope=False)
+    assert fields["occupancy_rate"]["value"] == pytest.approx(.94)
+    # No aliases: only the profile's own field names are mapped.
+    assert not {"current_noi", "occupancy", "rentable_area"} & set(fields)
+
+
+def test_workbook_only_case_is_controlled_error_without_calling_model():
+    result = hana_adapter.extract({"documents": [{"document_id": "model", "path": "model.xlsx"}],
+                                   "requested_fields": {"units": {"unit": "count"}}})
+    assert "No supported PDF input" in result["error"]
+    assert result["usage"] == []
+    assert result["fields"] == {}
+
+
+def review_csv(root, *, approved=False, date="2026-10-09"):
+    dataset = load_dataset(root)
+    path = root / "review.csv"
+    columns = ["case_id", "field", "status", "expected_value", "unit", "candidates", "evidence", "review_note", "review_status", "reviewer", "reviewed_at"]
+    with path.open("w", newline="") as target:
+        writer = csv.DictWriter(target, fieldnames=columns)
+        writer.writeheader()
+        for cid, fields in dataset.labels.items():
+            for name, label in fields.items():
+                writer.writerow({"case_id": cid, "field": name, "status": label["status"], "expected_value": format_value(label["value"]),
+                                 "unit": label["unit"], "candidates": "", "evidence": format_locations(dataset.evidence[cid][name]["locations"]),
+                                 "review_note": "Reviewed source", "review_status": "approved" if approved else "pending_domain_review",
+                                 "reviewer": "Domain Reviewer" if approved else "", "reviewed_at": date if approved else ""})
+    return path
+
+
+def test_review_import_validates_before_writing_and_versions_labels(dataset_root):
+    path = review_csv(dataset_root, approved=True)
+    before = (dataset_root / "ground_truth/labels.json").read_bytes()
+    import_review(dataset_root, path, "1.0", check=True)
+    assert (dataset_root / "ground_truth/labels.json").read_bytes() == before
+    import_review(dataset_root, path, "1.0")
+    dataset = load_dataset(dataset_root)
+    assert dataset.version == "1.0"
+    assert all(g["review_status"] == "approved" for g in dataset.labels["example"].values())
+
+
+def test_invalid_approval_does_not_overwrite_labels(dataset_root):
+    path = review_csv(dataset_root, approved=True, date="not-a-date")
+    before = (dataset_root / "ground_truth/labels.json").read_bytes()
+    with pytest.raises(ValueError, match="ISO review date"):
+        import_review(dataset_root, path, "1.0")
+    assert (dataset_root / "ground_truth/labels.json").read_bytes() == before
+
+
+def test_review_import_requires_every_row(dataset_root):
+    path = review_csv(dataset_root)
+    path.write_text("\n".join(path.read_text().splitlines()[:-1]) + "\n")
+    with pytest.raises(ValueError, match="omitted rows"):
+        import_review(dataset_root, path, "1.0")
+
+
+def test_restoration_uses_manifest_checksums_and_does_not_import_zip_code(dataset_root):
+    source = dataset_root / "inputs/example.pdf"
+    original = source.read_bytes()
+    archive = dataset_root / "pack.zip"
+    with zipfile.ZipFile(archive, "w") as pack:
+        pack.writestr("hana-benchmark/inputs/example.pdf", original)
+        pack.writestr("../untrusted.py", "raise RuntimeError('do not execute')")
+    source.unlink()
+    restore(archive, dataset_root)
+    assert source.read_bytes() == original
+    assert not (dataset_root / "untrusted.py").exists()
+    with zipfile.ZipFile(archive, "w") as pack:
+        pack.writestr("hana-benchmark/inputs/example.pdf", b"incorrect source")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        restore(archive, dataset_root)
+    assert source.read_bytes() == original
+
+
+def test_cached_creation_requires_its_rate():
+    call = {"model": "test", "input_tokens": 12, "output_tokens": 1, "cache_creation_input_tokens": 2}
+    assert model_cost({"usage": [call]}, {"test": {"input_per_million": 1, "output_per_million": 1}}) is None
+
+
+def test_nonfinite_live_prediction_is_controlled_case_failure(dataset_root):
+    dataset = load_dataset(dataset_root)
+    def bad_adapter(case):
+        pred = predictions()["example"]
+        pred["fields"]["asking_price"]["value"] = float("nan")
+        return pred
+    report, _ = run(dataset, dataset.cases, adapter=bad_adapter)
+    assert report["metrics"]["case_error_rate"] == 1
+    assert report["metrics"]["field_accuracy"] == 0
+
+
+def test_real_adapter_keeps_usage_from_failed_output(monkeypatch):
+    monkeypatch.setattr(hana_adapter, "read_pdf", lambda p: [{"file_name": "fixture.pdf", "page_number": 1, "text": "No terms."}])
+    response = tool_response(full_output(), stop_reason="max_tokens")
+    response.usage = SimpleNamespace(input_tokens=10, output_tokens=5)
+    result = hana_adapter.extract({"documents": [{"document_id": "d", "path": "fixture.pdf"}],
+                                   "requested_fields": {"asking_price": {"unit": "USD"}}}, client=fake_client(response))
+    assert result["fields"] == {}
+    assert result["usage"][0]["output_tokens"] == 5
+    assert "ExtractionOutputError" in result["error"]
+
+
+def test_cli_passes_model_and_provider_to_production_adapter(dataset_root, monkeypatch):
+    calls = []
+    def adapter(case, **options):
+        calls.append(options)
+        return predictions()["example"]
+    monkeypatch.setattr(hana_adapter, "extract", adapter)
+    assert main(["--dataset", str(dataset_root), "--allow-draft", "--provider", "openrouter",
+                 "--model", "google/test-model", "--out", str(dataset_root / "out")]) == 0
+    assert calls == [{"provider": "openrouter", "model": "google/test-model"}]
+
+
+def test_a_field_the_extractor_has_no_place_for_is_rejected(dataset_root):
+    edit(dataset_root, "inputs/cases.json", lambda c: c["cases"][0]["requested_fields"].update(
+        lp_return={"unit": "ratio", "description": "LP preferred return; H9N has no field for it"}))
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"]["example"].update(lp_return={
+        "status": "present", "value": .08, "unit": "ratio", "abs_tolerance": 0,
+        "review_status": "pending_domain_review", "reviewer": None, "reviewed_at": None}))
+    edit(dataset_root, "ground_truth/evidence.json", lambda e: e["example"].update(
+        lp_return={"locations": [{"document_id": "example_doc", "page": 5}]}))
+    with pytest.raises(ValueError, match=r"example\.lp_return: Benchmark fields must be REPEDealProfile fields"):
+        load_dataset(dataset_root)
+
+
+def test_benchmark_fields_line_up_with_the_extractor():
+    # Every scalar REPEDealProfile value field is benchmarked (narratives
+    # can't be exact-matched), numeric fields in a numeric unit.
+    from backend.app.h9n.extraction.extraction_output import NUMERIC_FIELDS, QUOTE_ONLY_FIELDS, VALUE_FIELDS
+    from backend.evaluation.fields import PRODUCTION_FIELDS, UNIT_RULES
+    assert set(PRODUCTION_FIELDS) == set(VALUE_FIELDS) - QUOTE_ONLY_FIELDS
+    for name, (unit, _) in PRODUCTION_FIELDS.items():
+        assert (UNIT_RULES[unit][0] is not str) == (name in NUMERIC_FIELDS), name
+
+
+def test_a_case_without_labels_is_not_extracted(dataset_root):
+    def add_case(config):
+        case = copy.deepcopy(config["cases"][0])
+        case.update(case_id="unlabelled", requested_fields={})
+        config["cases"].append(case)
+    edit(dataset_root, "inputs/cases.json", add_case)
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"].update(unlabelled={}))
+    edit(dataset_root, "ground_truth/evidence.json", lambda e: e.update(unlabelled={}))
+    dataset = load_dataset(dataset_root)
+    calls = []
+    report, _ = run(dataset, dataset.cases, adapter=lambda case: calls.append(case["case_id"]) or predictions()["example"])
+    assert calls == ["example"]
+    assert report["unlabelled_cases"] == ["unlabelled"]
+    assert [c["case_id"] for c in report["cases"]] == ["example"]
+    assert report["metrics"]["label_coverage"] == pytest.approx(2 / (2 * 23))
+    assert report["metrics"]["field_accuracy"] == 1
+
+
+def test_unmapped_production_field_is_a_reported_mapping_gap(dataset_root):
+    dataset = load_dataset(dataset_root)
+    pred = predictions()["example"]
+    del pred["fields"]["cap_rate"]
+    pred["metadata"] = {"unsupported_schema_fields": ["cap_rate"]}
+    report, _ = run(dataset, dataset.cases, cached={"example": pred})
+    assert report["cases"][0]["mapping_gaps"] == ["cap_rate"]
+    assert report["metrics"]["mapping_gap_count"] == 1
+    assert report["metrics"]["field_accuracy"] == .5  # still scored, never hidden
+
+
+def test_production_scope_must_match_an_extractor_field(dataset_root):
+    edit(dataset_root, "inputs/cases.json", lambda c: c["cases"][0]["requested_fields"]["cap_rate"].update(unit="percent"))
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"]["example"]["cap_rate"].update(unit="percent"))
+    with pytest.raises(ValueError, match=r"example\.cap_rate: Benchmark fields must be REPEDealProfile fields"):
+        load_dataset(dataset_root)
+
+
+def test_compare_reports_metric_deltas_and_field_flips(dataset_root):
+    pred_file = dataset_root / "predictions.json"
+    pred_file.write_text(json.dumps(predictions()))
+    assert main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft",
+                 "--out", str(dataset_root / "before")]) == 0
+    worse = predictions()
+    worse["example"]["fields"]["asking_price"]["value"] = 99
+    pred_file.write_text(json.dumps(worse))
+    assert main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft",
+                 "--compare", str(dataset_root / "before/report.json"), "--out", str(dataset_root / "after")]) == 0
+    comparison = json.loads((dataset_root / "after/report.json").read_text())["comparison"]
+    assert comparison["metric_deltas"]["field_accuracy"] == {"baseline": 1, "current": .5, "delta": -.5}
+    assert comparison["warnings"] == []
+    assert [(f["field"], f["baseline_value_correct"], f["value_correct"]) for f in comparison["field_changes"]] == [
+        ("asking_price", True, False)]
+    markdown = (dataset_root / "after/report.md").read_text(encoding="utf-8")
+    assert "## Compared with run" in markdown and "| asking_price | True → False |" in markdown
+
+
+def test_compare_rejects_a_file_that_is_not_a_report(dataset_root):
+    pred_file = dataset_root / "predictions.json"
+    pred_file.write_text(json.dumps(predictions()))
+    with pytest.raises(SystemExit) as error:
+        main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft",
+              "--compare", str(pred_file)])
+    assert error.value.code == 2
+
+
+def test_report_markdown_lists_every_field_with_its_outcome(dataset_root):
+    pred_file = dataset_root / "predictions.json"
+    pred_file.write_text(json.dumps(predictions()))
+    main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft", "--out", str(dataset_root / "out")])
+    markdown = (dataset_root / "out/report.md").read_text(encoding="utf-8")
+    assert "| asking_price | 100 | 100 | ✓ | ✓ |" in markdown
+    assert "| cap_rate | missing | missing | ✓ | ✓ |" in markdown
+
+
+def test_default_pricing_prices_the_default_models_and_flags_unpriced_ones(dataset_root):
+    from backend.app.h9n.extraction.repe_extractor import DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENROUTER_MODEL
+    from backend.evaluation.benchmark import DEFAULT_PRICING
+    from backend.evaluation.dataset import read_json
+    pricing = read_json(DEFAULT_PRICING)
+    assert {DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENROUTER_MODEL} <= set(pricing)
+    for model, rates in pricing.items():
+        if not model.startswith("_"):
+            assert rates and all(type(v) is float and v >= 0 for v in rates.values())
+    pred = predictions()
+    pred["example"].update(execution_kind="hana_production_pdf", usage=[
+        {"model": DEFAULT_ANTHROPIC_MODEL, "input_tokens": 1_000_000, "output_tokens": 0}])
+    pred_file = dataset_root / "predictions.json"
+    pred_file.write_text(json.dumps(pred))
+    main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft", "--out", str(dataset_root / "a")])
+    report = json.loads((dataset_root / "a/report.json").read_text())
+    assert report["metrics"]["approx_model_cost_usd"] == pytest.approx(3.0)
+    assert report["unpriced_models"] == []
+    pred["example"]["usage"][0]["model"] = "someone/unpriced-model"
+    pred_file.write_text(json.dumps(pred))
+    main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft", "--out", str(dataset_root / "b")])
+    report = json.loads((dataset_root / "b/report.json").read_text())
+    assert report["metrics"]["approx_model_cost_usd"] is None
+    assert report["unpriced_models"] == ["someone/unpriced-model"]
+    main(["--dataset", str(dataset_root), "--predictions", str(pred_file), "--allow-draft", "--no-pricing",
+          "--out", str(dataset_root / "c")])
+    assert json.loads((dataset_root / "c/report.json").read_text())["pricing_source"] is None
+
+
+def test_restore_from_directory_matches_by_checksum_not_name(dataset_root, tmp_path_factory):
+    from backend.evaluation.restore_inputs import missing_documents, restore_from_directory
+    source = dataset_root / "inputs/example.pdf"
+    original = source.read_bytes()
+    folder = tmp_path_factory.mktemp("drive_download")
+    (folder / "nested").mkdir()
+    (folder / "nested/Foregone x Example Deck[12].pdf").write_bytes(original)
+    (folder / "unrelated.pdf").write_bytes(b"not in the manifest")
+    source.unlink()
+    assert missing_documents(load_dataset(dataset_root)) == ["example_doc"]
+    assert restore_from_directory(folder, dataset_root) == ["example_doc"]
+    assert source.read_bytes() == original
+    assert missing_documents(load_dataset(dataset_root)) == []
+    assert not (dataset_root / "inputs/unrelated.pdf").exists()
+
+
+def test_public_download_is_checksum_verified(dataset_root):
+    from backend.evaluation.restore_inputs import download_public
+    source = dataset_root / "inputs/example.pdf"
+    original = source.read_bytes()
+    edit(dataset_root, "inputs/manifest.json", lambda m: m[0].update(url="https://broker.example/om.pdf"))
+    source.unlink()
+
+    class Response:
+        def __init__(self, body):
+            self.body = body
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+        def read(self, limit):
+            return self.body[:limit]
+
+    restored, failures = download_public(dataset_root, opener=lambda request, timeout: Response(b"replaced by broker"))
+    assert restored == [] and "checksum mismatch" in failures["example_doc"]
+    assert not source.exists()
+    restored, failures = download_public(dataset_root, opener=lambda request, timeout: Response(original))
+    assert restored == ["example_doc"] and failures == {}
+    assert source.read_bytes() == original
+
+
+def test_production_named_fields_are_scored_but_aliases_are_not_invented():
+    profile = REPEDealProfile(noi=1_470_000, cap_rate=7.9, property_type="Multifamily")
+    case = {"documents": [], "requested_fields": {"noi": {"unit": "USD"}, "cap_rate": {"unit": "ratio"},
+                                                   "property_type": {"unit": "text"}, "current_noi": {"unit": "USD"},
+                                                   "proforma_cap_rate": {"unit": "ratio"}}}
+    fields = hana_adapter.profile_fields(profile, case, incomplete_scope=False)
+    assert fields["noi"]["value"] == 1_470_000
+    assert fields["cap_rate"]["value"] == pytest.approx(.079)
+    assert fields["property_type"]["value"] == "Multifamily"
+    assert "current_noi" not in fields and "proforma_cap_rate" not in fields
+
+
+def test_every_bundled_field_is_what_the_adapter_maps():
+    data = load_dataset()
+    fields = {(c["case_id"], name) for c in data.cases for name in c["requested_fields"]}
+    mapped = {(c["case_id"], name) for c in data.cases for name, spec in c["requested_fields"].items()
+              if name in hana_adapter.FIELD_MAP and hana_adapter.FIELD_MAP[name][1] == spec["unit"]}
+    assert fields == mapped
+    # Relabelled under their profile names. Values aren't pinned here: the
+    # domain review exists to correct them.
+    assert {("corporate_place", "noi"), ("chicago", "cap_rate"), ("chicago", "annual_revenue"),
+            ("opulent", "units")} <= fields
+
+
+def test_review_import_can_add_a_described_field(dataset_root):
+    path = review_csv(dataset_root)
+    with path.open() as source:
+        rows = list(csv.DictReader(source))
+    columns = list(rows[0]) + ["description", "abs_tolerance"]
+    rows.append({"case_id": "example", "field": "noi", "status": "present", "expected_value": "1470000", "unit": "USD",
+                 "candidates": "", "evidence": "example_doc p2",
+                 "review_note": "In-place NOI from the financial summary", "review_status": "pending_domain_review",
+                 "reviewer": "", "reviewed_at": "", "description": "NOI as REPEDealProfile.noi records it", "abs_tolerance": "1"})
+    with path.open("w", newline="") as target:
+        writer = csv.DictWriter(target, fieldnames=columns, restval="")
+        writer.writeheader()
+        writer.writerows(rows)
+    import_review(dataset_root, path, "0.2")
+    dataset = load_dataset(dataset_root)
+    assert dataset.cases[0]["requested_fields"]["noi"] == {"unit": "USD", "description": "NOI as REPEDealProfile.noi records it"}
+    assert dataset.labels["example"]["noi"]["value"] == 1470000
+    assert dataset.labels["example"]["noi"]["abs_tolerance"] == 1
+    assert dataset.evidence["example"]["noi"]["locations"] == [{"document_id": "example_doc", "page": 2}]
+
+
+def test_review_import_rejects_a_field_the_extractor_lacks(dataset_root):
+    path = review_csv(dataset_root)
+    with path.open("a", newline="") as target:
+        csv.writer(target).writerow(["example", "lp_return", "present", "0.08", "ratio", "", "example_doc p2", "",
+                                     "pending_domain_review", "", ""])
+    before = (dataset_root / "ground_truth/labels.json").read_bytes()
+    with pytest.raises(ValueError, match="an extractor field"):
+        import_review(dataset_root, path, "0.2")
+    assert (dataset_root / "ground_truth/labels.json").read_bytes() == before
+
+
+def test_conflicting_passages_become_candidates_with_every_citation():
+    # Shaped like M1.2's WithheldValue.conflicting_values; built from plain
+    # objects so this runs against profiles with or without that field.
+    def passage(value, page):
+        return SimpleNamespace(value=value, evidence=SimpleNamespace(source_document="om.pdf", page_number=page))
+    withheld = SimpleNamespace(field_name="cap_rate", reason="conflicting_evidence",
+                               conflicting_values=[passage(6.5, 2), passage(7.0, 9), passage(6.5, 11)])
+    profile = SimpleNamespace(withheld_values=[withheld], conflicting_information=[], uncertain_information=[],
+                              evidence=[], cap_rate=None, asking_price=None)
+    case = {"documents": [{"document_id": "om", "path": "/x/om.pdf"}],
+            "requested_fields": {"cap_rate": {"unit": "ratio"}}}
+    field = hana_adapter.profile_fields(profile, case, incomplete_scope=False)["cap_rate"]
+    assert field["status"] == "conflict"
+    assert field["candidates"] == [pytest.approx(.065), pytest.approx(.07)]
+    assert {e["page"] for e in field["evidence"]} == {2, 9, 11}
+    gold = {"status": "conflict", "value": None, "candidates": [.07, .065], "unit": "ratio", "abs_tolerance": 0}
+    assert value_correct(field, gold)
+    # A model flag with a single passage stays a candidate-less conflict.
+    withheld.reason, withheld.conflicting_values = "model_conflicting", [passage(6.5, 2)]
+    field = hana_adapter.profile_fields(profile, case, incomplete_scope=False)["cap_rate"]
+    assert field["status"] == "conflict" and "candidates" not in field
+
+
+def test_adapter_without_model_records_the_providers_default(monkeypatch):
+    from backend.app.h9n.extraction.repe_extractor import DEFAULT_OPENROUTER_MODEL
+    monkeypatch.setenv("H9N_EXTRACTION_PROVIDER", "anthropic")
+    monkeypatch.setattr(hana_adapter, "read_pdf", lambda p: [{"file_name": "f.pdf", "page_number": 1, "text": "No terms."}])
+    client = fake_client(tool_response(full_output()))
+    result = hana_adapter.extract({"documents": [{"document_id": "d", "path": "f.pdf"}],
+                                   "requested_fields": {"asking_price": {"unit": "USD"}}}, client=client, provider="openrouter")
+    assert result["metadata"]["requested_model"] == DEFAULT_OPENROUTER_MODEL
+    assert client.messages.create.call_args.kwargs["model"] == DEFAULT_OPENROUTER_MODEL
+
+
+def test_cost_falls_back_to_the_requested_models_rate():
+    call = {"model": "anthropic/claude-4.5-sonnet-20250929", "requested_model": "anthropic/claude-sonnet-4.5",
+            "input_tokens": 1_000_000, "output_tokens": 0}
+    pricing = {"anthropic/claude-sonnet-4.5": {"input_per_million": 3.0, "output_per_million": 15.0}}
+    assert model_cost({"usage": [call]}, pricing) == pytest.approx(3.0)
+    from backend.evaluation.benchmark import unpriced_models
+    assert unpriced_models({"c": {"usage": [call]}}, pricing) == []
+    assert unpriced_models({"c": {"usage": [call]}}, {}) == ["anthropic/claude-4.5-sonnet-20250929"]
+
+
+def test_live_run_saves_after_each_case_and_resume_skips_finished_ones(dataset_root, monkeypatch):
+    def add_case(config):
+        case = copy.deepcopy(config["cases"][0])
+        case.update(case_id="second")
+        config["cases"].append(case)
+    edit(dataset_root, "inputs/cases.json", add_case)
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"].update(second=copy.deepcopy(g["cases"]["example"])))
+    edit(dataset_root, "ground_truth/evidence.json", lambda e: e.update(second=copy.deepcopy(e["example"])))
+    calls = []
+
+    def crashes_on_second(case, **options):
+        calls.append(case["case_id"])
+        if case["case_id"] == "second":
+            raise KeyboardInterrupt  # Ctrl-C partway through a paid run
+        pred = predictions()["example"]
+        pred["metadata"] = {"requested_model": options.get("model")}
+        return pred
+
+    monkeypatch.setattr(hana_adapter, "extract", crashes_on_second)
+    out = dataset_root / "run"
+    args = ["--dataset", str(dataset_root), "--allow-draft", "--model", "m1", "--out", str(out)]
+    with pytest.raises(KeyboardInterrupt):
+        main(args)
+    saved = json.loads((out / "predictions.json").read_text())
+    assert list(saved) == ["example"]
+
+    def finishes(case, **options):
+        calls.append(case["case_id"])
+        pred = predictions()["example"]
+        pred["metadata"] = {"requested_model": options.get("model")}
+        return pred
+
+    monkeypatch.setattr(hana_adapter, "extract", finishes)
+    calls.clear()
+    assert main(args + ["--resume", str(out / "predictions.json")]) == 0
+    assert calls == ["second"]
+    report = json.loads((out / "report.json").read_text())
+    assert report["resumed_cases"] == ["example"]
+    assert report["metrics"]["field_accuracy"] == 1
+    # A different model can't silently resume another model's run.
+    with pytest.raises(SystemExit) as error:
+        main(["--dataset", str(dataset_root), "--allow-draft", "--model", "m2", "--out", str(dataset_root / "other"),
+              "--resume", str(out / "predictions.json")])
+    assert error.value.code == 2
+
+
+def test_dataset_errors_name_the_case_and_field(dataset_root):
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"]["example"]["asking_price"].update(unit="EUR"))
+    with pytest.raises(ValueError, match=r"^example\.asking_price: Label/spec unit mismatch"):
+        load_dataset(dataset_root)
+
+
+def test_kept_value_with_only_a_possible_conflict_is_scored_by_its_value():
+    # Shaped like M1.2's PossibleConflict: the value stays stored, and its
+    # detail is also an uncertain_information note for the review form.
+    detail = "The same label gives a different figure elsewhere in the document: $1,500,000 (page 9)"
+    profile = SimpleNamespace(
+        noi=1_200_000, withheld_values=[], conflicting_information=[], asking_price=None,
+        uncertain_information=[f"noi: {detail}"],
+        possible_conflicts=[SimpleNamespace(field_name="noi", detail=detail)],
+        evidence=[SimpleNamespace(field_name="noi", source_document="om.pdf", page_number=4)])
+    case = {"documents": [{"document_id": "om", "path": "/x/om.pdf"}], "requested_fields": {"noi": {"unit": "USD"}}}
+    field = hana_adapter.profile_fields(profile, case, incomplete_scope=False)["noi"]
+    assert field == {"status": "present", "value": 1_200_000, "unit": "USD", "evidence": [{"document_id": "om", "page": 4}]}
+    # Any other uncertain note on the field still withholds it.
+    profile.uncertain_information.append("noi: rounded figure in the summary")
+    assert hana_adapter.profile_fields(profile, case, incomplete_scope=False)["noi"]["status"] == "uncertain"
+
+
+def test_bundled_review_csv_matches_the_labels():
+    # review.csv is generated from the JSON files; if someone edits one
+    # without the other, CI says so instead of the next import surprising them.
+    import io
+    from backend.evaluation.export_review import COLUMNS, review_rows
+    expected = io.StringIO()
+    writer = csv.DictWriter(expected, fieldnames=COLUMNS, lineterminator="\r\n")
+    writer.writeheader()
+    writer.writerows(review_rows(DEFAULT_ROOT))
+    with (DEFAULT_ROOT / "ground_truth/review.csv").open(newline="", encoding="utf-8") as source:
+        assert source.read() == expected.getvalue()
+
+
+def test_export_then_import_round_trips_and_skips_rows_to_label(dataset_root):
+    from backend.evaluation.export_review import export_review
+    rows = export_review(dataset_root, dataset_root / "review.csv")
+    todo = [r for r in rows if r["review_status"] == "to_label"]
+    assert {r["field"] for r in todo} >= {"noi", "property_type", "address"}
+    assert "asking_price" not in {r["field"] for r in todo}  # already labelled
+    before = {name: (dataset_root / name).read_text() for name in ("ground_truth/labels.json", "ground_truth/evidence.json")}
+    summary = import_review(dataset_root, dataset_root / "review.csv", "draft-2")
+    assert summary["to_label"] == len(todo) and summary["added_fields"] == 0
+    dataset = load_dataset(dataset_root)
+    assert set(dataset.labels["example"]) == {"asking_price", "cap_rate"}
+    assert json.loads(before["ground_truth/labels.json"])["cases"] == json.loads(
+        (dataset_root / "ground_truth/labels.json").read_text())["cases"]
+
+
+def write_review(path, rows):
+    with path.open("w", newline="", encoding="utf-8") as target:
+        writer = csv.DictWriter(target, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_domain_review_flow_fill_import_commit(dataset_root):
+    # The documented flow: fill review.csv as a spreadsheet shows values, run
+    # import_review --version 0.2.0, commit. No separate export step: the
+    # import leaves review.csv exactly as export_review would write it.
+    from backend.evaluation.export_review import export_review, review_rows
+    path = dataset_root / "ground_truth/review.csv"
+    rows = export_review(dataset_root, path)
+    noi = next(r for r in rows if r["field"] == "noi")
+    noi.update(review_status="approved", status="present", expected_value="$1,470,000", evidence="example_doc p2",
+               review_note="Financial summary, in-place NOI", reviewer="Domain Reviewer", reviewed_at="2026-10-20")
+    occupancy = next(r for r in rows if r["field"] == "occupancy_rate")
+    occupancy.update(review_status="pending_domain_review", status="present", expected_value="94.5%",
+                     evidence="example_doc p3")
+    write_review(path, rows)
+    summary = import_review(dataset_root, path, "0.2.0")
+    assert summary["added_fields"] == 2 and summary["approved"] == 1
+    dataset = load_dataset(dataset_root)
+    assert dataset.version == "0.2.0"
+    assert dataset.labels["example"]["noi"]["value"] == 1470000
+    assert dataset.labels["example"]["noi"]["reviewer"] == "Domain Reviewer"
+    assert dataset.labels["example"]["occupancy_rate"]["value"] == .945
+    assert dataset.evidence["example"]["occupancy_rate"]["locations"] == [{"document_id": "example_doc", "page": 3}]
+    with path.open(newline="", encoding="utf-8") as source:
+        assert list(csv.DictReader(source)) == review_rows(dataset_root)
+
+
+def test_a_value_outside_its_unit_is_rejected_and_nothing_written(dataset_root):
+    from backend.evaluation.export_review import export_review
+    path = dataset_root / "ground_truth/review.csv"
+    rows = export_review(dataset_root, path)
+    next(r for r in rows if r["field"] == "occupancy_rate").update(
+        review_status="pending_domain_review", status="present", expected_value="94.5", evidence="example_doc p3")
+    write_review(path, rows)
+    before = {name: (dataset_root / name).read_bytes() for name in ("ground_truth/labels.json", "ground_truth/review.csv")}
+    with pytest.raises(ValueError, match=r"example\.occupancy_rate: 94\.5 is not a valid ratio value"):
+        import_review(dataset_root, path, "0.2.0")
+    assert {name: (dataset_root / name).read_bytes() for name in before} == before
+
+
+def test_a_locked_worksheet_fails_the_import_before_any_label_changes(dataset_root, monkeypatch):
+    # Windows won't replace a CSV that Excel has open. That must fail before
+    # the answer key changes, or a rerun is refused as an unchanged version.
+    from backend.evaluation.export_review import export_review
+    path = dataset_root / "ground_truth/review.csv"
+    export_review(dataset_root, path)
+    before = (dataset_root / "ground_truth/labels.json").read_bytes()
+    replace = Path.replace
+
+    def locked(self, target):
+        if Path(target) == path:
+            raise PermissionError("review.csv is open in Excel")
+        return replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", locked)
+    with pytest.raises(PermissionError):
+        import_review(dataset_root, path, "0.2.0")
+    assert (dataset_root / "ground_truth/labels.json").read_bytes() == before
+
+
+def test_a_split_without_labels_stops_before_extraction(dataset_root):
+    edit(dataset_root, "inputs/cases.json", lambda c: c["cases"][0].update(requested_fields={}))
+    edit(dataset_root, "ground_truth/labels.json", lambda g: g["cases"].update(example={}))
+    edit(dataset_root, "ground_truth/evidence.json", lambda e: e.update(example={}))
+    with pytest.raises(SystemExit) as error:
+        main(["--dataset", str(dataset_root), "--allow-draft"])
+    assert error.value.code == 2
+
+
+def test_worksheet_cells_read_what_a_spreadsheet_shows():
+    assert parse_value("5.87%", "ratio") == .0587
+    assert parse_value("$2,100,000", "USD") == 2100000
+    assert parse_value("0.0587", "ratio") == .0587
+    assert parse_value(" Multifamily ", "text") == "Multifamily"
+    assert parse_value("", "USD") is None
+    assert parse_value(None, "USD") is None and parse_locations(None) == []  # a short row's missing cells
+    assert parse_value(format_value(.00005), "ratio") == .00005  # JSON writes it as 5e-05
+    for bad, unit in (("1,5", "USD"), ("5%", "USD"), ("about 5", "count")):
+        with pytest.raises(ValueError):
+            parse_value(bad, unit)
+    locations = [{"document_id": "om", "page": 3}, {"document_id": "model", "sheet": "Base Case", "cell": "N15"}]
+    assert parse_locations("om p3; model Base Case!n15") == locations
+    assert format_locations(locations) == "om p3; model Base Case!N15"
+    with pytest.raises(ValueError, match="must look like"):
+        parse_locations("om page three")
+
+
+def test_a_labelled_row_cannot_be_set_back_to_to_label(dataset_root):
+    from backend.evaluation.export_review import export_review
+    path = dataset_root / "review.csv"
+    rows = export_review(dataset_root, path)
+    rows[0]["review_status"] = "to_label"
+    write_review(path, rows)
+    with pytest.raises(ValueError, match=r"line 2 \(example\.asking_price\): A labelled field can't go back"):
+        import_review(dataset_root, path, "0.2.0")

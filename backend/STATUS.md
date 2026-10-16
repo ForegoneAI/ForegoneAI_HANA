@@ -11,7 +11,7 @@ if the checks are green, the code behind these items actually runs.
 | 2 | Field-Level Source Evidence | ✅ Done |
 | 3 | Missing, Uncertain, and Conflicting Information | ✅ Done |
 | 4 | Human Review and Correction | ✅ Done |
-| 5 | Ground-Truth Evaluation Set | ✅ Done |
+| 5 | Ground-Truth Evaluation Set | ✅ Built (awaiting domain sign-off) |
 | 6 | Extraction Evaluation | ✅ Done |
 | 7 | Unseen-Deal Testing | ✅ Done |
 | 8 | Final End-to-End Demo | ✅ Done |
@@ -78,50 +78,60 @@ This intentionally uses a simple on-disk JSON store, not a real database - see t
 top of `store.py`. There's no reviewer UI yet; correction happens by calling the API directly
 (e.g. from a script, or a tool like curl/Postman) until a frontend is built for it.
 
-## 5. Ground-Truth Evaluation Set — ✅ Done
+## 5. Ground-Truth Evaluation Set — ✅ Built, awaiting domain sign-off (M1.4)
 
-`backend/evaluation/cases.py` defines `GROUND_TRUTH_CASES`: synthetic deal packages (Meadowbrook
-Apartments, Riverside Office Plaza), each paired with the known-correct value for every field the
-text unambiguously states. Because the text and the "correct answer" are both written by hand,
-the ground truth is exact by construction - no separate human verification step was needed for
-these two cases.
+`backend/evaluation/benchmark_data/` holds a versioned ground-truth set of real deal packages: 26
+expected values so far across five deal families (Roderick, Opulent, Daly City, Chicago, Corporate
+Place) plus a workbook diagnostic (Townhomes). Expected values (`ground_truth/labels.json`) and evidence
+pages/cells (`ground_truth/evidence.json`) are stored separately from any extraction output, the
+source files are pinned by SHA-256 in `inputs/manifest.json`, and the sources themselves stay out of
+Git (restore them with `python -m backend.evaluation.restore_inputs`).
 
-**Real limitation, stated plainly:** a synthetic set only proves the extractor can read clearly-
-stated facts back correctly. It says nothing about real CIMs' messier formatting, OCR'd/scanned
-text, or genuinely ambiguous wording. Real, human-reviewed deals should be added here (or replace
-these cases) as they become available - see `cases.py`'s module docstring for more.
+Every benchmark field is a field the extractor produces (`REPEDealProfile`, listed in
+`evaluation/fields.py`); the loader rejects anything else. Version 0.1.1-draft renamed equivalent
+fields to their profile names; 0.1.2-draft renamed two more (Opulent total keys -> `units`, Chicago
+current scheduled gross income -> `annual_revenue`) and removed the 70 labels for facts the
+extractor has no field for (preferred return, IRR, scenario costs...; they remain in Git history at
+0.1.1-draft if a profile field is added for one).
 
-## 6. Extraction Evaluation — ✅ Done
+**Still needed from people, not code:** every label is `pending_domain_review`. The domain team
+works through `ground_truth/review.csv`, checking the 26 labelled rows and filling the 112
+`to_label` rows: the extractor fields each deal has no answer for yet. Roderick has none yet (it
+isn't scored until it does) and Opulent one. Then they import it with `python -m
+backend.evaluation.import_review --version 0.2.0` and commit. Until then, reports say
+`DRAFT_NOT_DOMAIN_APPROVED`.
 
-`backend/evaluation/evaluate.py` runs the real extractor against every ground-truth case and
-scores it field by field (numbers compared with a small tolerance, strings compared case- and
-whitespace-insensitively), then prints a per-field and overall accuracy report:
+The older synthetic cases in `cases.py` remain for the demo and the free scoring tests.
 
-```powershell
-python -m backend.evaluation.evaluate
-```
+## 6. Extraction Evaluation — ✅ Done (M1.5)
 
-This calls the real Claude API (needs `ANTHROPIC_API_KEY`, costs a little to run), so it's a
-script you run manually rather than part of the free `pytest` suite. The *scoring logic itself* -
-does it correctly mark a field right or wrong, tolerate float rounding, etc. - is covered by
-`backend/tests/test_evaluate.py` with a mocked client, so that part does run for free in CI.
-
-## 7. Unseen-Deal Testing — ✅ Done
-
-`backend/evaluation/cases.py` also defines `HOLDOUT_CASES`: two more synthetic deals (a self-
-storage facility, a retail center) that were never used while writing the extractor's prompt, and
-that deliberately use different document formatting (narrative prose, a bullet/stat-sheet style)
-than the ground-truth cases. Run them with:
+One command runs the production extractor over the benchmark and writes `report.md`,
+`report.json`, and `predictions.json`:
 
 ```powershell
-python -m backend.evaluation.evaluate --holdout
-# or both sets, reported separately:
-python -m backend.evaluation.evaluate --all
+python -m backend.evaluation.evaluate --allow-draft --out backend/evaluation/reports/hana-dev
 ```
 
-The discipline that keeps this meaningful going forward: if a holdout case ever starts failing,
-fix the prompt's general rule, don't add a special case for that one document's exact wording -
-and never move a holdout case into the ground-truth set just to make a failing run pass.
+It reports field accuracy, missing-field detection, unsupported extraction rate, evidence-page
+correctness, latency, and approximate model cost (from `evaluation/pricing.json`) over every
+labelled field, plus `label_coverage` (how many of the extractor's fields are labelled). `--compare
+<earlier report.json>` lists what changed after a prompt or model change, `--provider`/`--model`
+switch between Anthropic and OpenRouter models, and `--predictions` replays a saved run for free.
+This calls the real model and costs money, so it's run by hand; the runner, scoring, dataset checks
+and adapter are covered offline by `backend/tests/test_benchmark*.py` in CI.
+
+## 7. Unseen-Deal Testing — ✅ Set up, run when prompts are frozen
+
+Chicago and Corporate Place are reserved: no family or source file is shared with the development
+split (the loader enforces that), and the runner refuses them unless asked explicitly:
+
+```powershell
+python -m backend.evaluation.evaluate --split holdout --unlock-holdout --allow-draft
+```
+
+The discipline that keeps this meaningful: only run the holdout after freezing the prompt and model,
+keep its reports out of prompt tuning, and fix the prompt's general rule rather than a special case
+for one document when a reserved case fails.
 
 ## 8. Final End-to-End Demo — ✅ Done
 

@@ -1,0 +1,25 @@
+{
+  "_note": "USD list prices per million tokens for the default extraction models. Check https://docs.claude.com/en/docs/about-claude/pricing and https://openrouter.ai/models before relying on cost figures, and add any model you evaluate. Models missing here report cost as unknown, never free.",
+  "claude-sonnet-4-5-20250929": {
+    "input_per_million": 3.0,
+    "output_per_million": 15.0,
+    "cached_input_per_million": 0.3,
+    "cache_creation_input_per_million": 3.75
+  },
+  "claude-sonnet-4-5": {
+    "input_per_million": 3.0,
+    "output_per_million": 15.0,
+    "cached_input_per_million": 0.3,
+    "cache_creation_input_per_million": 3.75
+  },
+  "anthropic/claude-sonnet-4.5": {
+    "input_per_million": 3.0,
+    "output_per_million": 15.0,
+    "cached_input_per_million": 0.3,
+    "cache_creation_input_per_million": 3.75
+  },
+  "google/gemini-2.5-flash": {
+    "input_per_million": 0.3,
+    "output_per_million": 2.5
+  }
+}

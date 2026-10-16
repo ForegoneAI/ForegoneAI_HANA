@@ -1,0 +1,180 @@
+{
+  "dataset_version": "0.1.2-draft",
+  "cases": [
+    {
+      "case_id": "roderick",
+      "family_id": "roderick",
+      "split": "dev",
+      "kind": "deal_package",
+      "documents": [
+        "roderick_investor",
+        "roderick_pitch",
+        "roderick_onepager",
+        "roderick_market",
+        "roderick_model"
+      ],
+      "requested_fields": {}
+    },
+    {
+      "case_id": "opulent",
+      "family_id": "opulent",
+      "split": "dev",
+      "kind": "deal_package",
+      "documents": [
+        "opulent_deck",
+        "opulent_investor",
+        "opulent_model"
+      ],
+      "requested_fields": {
+        "units": {
+          "unit": "count",
+          "description": "Number of units (residential units, keys, or suites as stated). (Benchmark field 'total_keys': Source-stated total keys. Do not reconcile with other sources in this source-specific field.)"
+        }
+      }
+    },
+    {
+      "case_id": "daly_city",
+      "family_id": "daly_city",
+      "split": "dev",
+      "kind": "single_document_deal",
+      "documents": [
+        "daly_city"
+      ],
+      "requested_fields": {
+        "asking_price": {
+          "unit": "USD",
+          "description": "asking price"
+        },
+        "square_feet": {
+          "unit": "sqft",
+          "description": "The property's stated size in square feet (building or rentable area). (Benchmark field 'building_area': building area)"
+        },
+        "units": {
+          "unit": "count",
+          "description": "units"
+        },
+        "year_built": {
+          "unit": "year",
+          "description": "year built"
+        }
+      }
+    },
+    {
+      "case_id": "chicago",
+      "family_id": "chicago",
+      "split": "holdout",
+      "kind": "single_document_deal",
+      "documents": [
+        "chicago"
+      ],
+      "requested_fields": {
+        "units": {
+          "unit": "count",
+          "description": "units"
+        },
+        "asking_price": {
+          "unit": "USD",
+          "description": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+        },
+        "cap_rate": {
+          "unit": "ratio",
+          "description": "Current (in-place) cap rate as a ratio; not pro forma. (Benchmark field 'current_cap_rate': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
+        },
+        "noi": {
+          "unit": "USD",
+          "description": "Current (in-place) net operating income; not pro forma. (Benchmark field 'current_noi': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
+        },
+        "loan_amount": {
+          "unit": "USD",
+          "description": "Loan amount stated for the deal (existing, proposed or modeled). (Benchmark field 'modeled_loan_amount': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
+        },
+        "interest_rate": {
+          "unit": "ratio",
+          "description": "Interest rate of that loan as a ratio. (Benchmark field 'modeled_interest_rate': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
+        },
+        "annual_revenue": {
+          "unit": "USD",
+          "description": "Current annual revenue / gross income as stated. (Benchmark field 'current_scheduled_gross_income': Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment.)"
+        }
+      }
+    },
+    {
+      "case_id": "corporate_place",
+      "family_id": "corporate_place",
+      "split": "holdout",
+      "kind": "single_document_deal",
+      "documents": [
+        "corporate_place"
+      ],
+      "requested_fields": {
+        "asking_price": {
+          "unit": "USD",
+          "description": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+        },
+        "cap_rate": {
+          "unit": "ratio",
+          "description": "Current (in-place) cap rate as a ratio; not pro forma. (Benchmark field 'current_cap_rate': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
+        },
+        "noi": {
+          "unit": "USD",
+          "description": "Current (in-place) net operating income; not pro forma. (Benchmark field 'current_noi': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
+        },
+        "square_feet": {
+          "unit": "sqft",
+          "description": "The property's stated size in square feet (building or rentable area). (Benchmark field 'rentable_area': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
+        },
+        "occupancy_rate": {
+          "unit": "ratio",
+          "description": "Current occupancy as a ratio (94% -> 0.94). (Benchmark field 'occupancy': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
+        },
+        "loan_amount": {
+          "unit": "USD",
+          "description": "Loan amount stated for the deal (existing, proposed or modeled). (Benchmark field 'modeled_loan_amount': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
+        },
+        "interest_rate": {
+          "unit": "ratio",
+          "description": "Interest rate of that loan as a ratio. (Benchmark field 'modeled_interest_rate': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
+        },
+        "loan_term_years": {
+          "unit": "years",
+          "description": "Loan term in years. (Benchmark field 'modeled_loan_term_years': Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms.)"
+        }
+      }
+    },
+    {
+      "case_id": "townhomes",
+      "family_id": "anonymous_template",
+      "split": "diagnostic",
+      "kind": "anonymous_model_not_verified_deal",
+      "documents": [
+        "townhomes_model"
+      ],
+      "requested_fields": {
+        "units": {
+          "unit": "count",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "ltv": {
+          "unit": "ratio",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "loan_amount": {
+          "unit": "USD",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "interest_rate": {
+          "unit": "ratio",
+          "description": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+        },
+        "address": {
+          "unit": "text",
+          "description": "Street address of the subject property. (Benchmark field 'property_address': property address. Extract only if supported by the supplied sources; otherwise report missing.)"
+        },
+        "sponsor_name": {
+          "unit": "text",
+          "description": "Sponsor's name. (Benchmark field 'sponsor_legal_name': sponsor legal name. Extract only if supported by the supplied sources; otherwise report missing.)"
+        }
+      }
+    }
+  ]
+}

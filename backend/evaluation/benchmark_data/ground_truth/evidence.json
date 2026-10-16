@@ -1,0 +1,277 @@
+{
+  "roderick": {},
+  "opulent": {
+    "units": {
+      "locations": [
+        {
+          "document_id": "opulent_investor",
+          "page": 2
+        },
+        {
+          "document_id": "opulent_deck",
+          "page": 2
+        }
+      ],
+      "review_note": "Source-stated total keys. Do not reconcile with other sources in this source-specific field. Renamed from total_keys to the profile field units; domain review should confirm they mean the same thing."
+    }
+  },
+  "daly_city": {
+    "asking_price": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3
+        }
+      ],
+      "review_note": ""
+    },
+    "square_feet": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3
+        }
+      ],
+      "review_note": "Renamed from building_area to the profile field square_feet; domain review should confirm they mean the same thing."
+    },
+    "units": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3
+        }
+      ],
+      "review_note": ""
+    },
+    "year_built": {
+      "locations": [
+        {
+          "document_id": "daly_city",
+          "page": 3
+        }
+      ],
+      "review_note": ""
+    }
+  },
+  "chicago": {
+    "units": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 2
+        }
+      ],
+      "review_note": ""
+    },
+    "asking_price": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10
+        },
+        {
+          "document_id": "chicago",
+          "page": 2
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment."
+    },
+    "cap_rate": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment. Renamed from current_cap_rate to the profile field cap_rate; domain review should confirm they mean the same thing."
+    },
+    "noi": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10
+        },
+        {
+          "document_id": "chicago",
+          "page": 9
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment. Renamed from current_noi to the profile field noi; domain review should confirm they mean the same thing."
+    },
+    "loan_amount": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment. Renamed from modeled_loan_amount to the profile field loan_amount; domain review should confirm they mean the same thing."
+    },
+    "interest_rate": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment. Renamed from modeled_interest_rate to the profile field interest_rate; domain review should confirm they mean the same thing."
+    },
+    "annual_revenue": {
+      "locations": [
+        {
+          "document_id": "chicago",
+          "page": 10
+        },
+        {
+          "document_id": "chicago",
+          "page": 9
+        }
+      ],
+      "review_note": "Use named Current or Pro Forma column; financing is modeled, not evidence of a loan commitment. Renamed from current_scheduled_gross_income to the profile field annual_revenue; domain review should confirm they mean the same thing."
+    }
+  },
+  "corporate_place": {
+    "asking_price": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 39
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 8
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms."
+    },
+    "cap_rate": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from current_cap_rate to the profile field cap_rate; domain review should confirm they mean the same thing."
+    },
+    "noi": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from current_noi to the profile field noi; domain review should confirm they mean the same thing."
+    },
+    "square_feet": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 39
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 8
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from rentable_area to the profile field square_feet; domain review should confirm they mean the same thing."
+    },
+    "occupancy_rate": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5
+        },
+        {
+          "document_id": "corporate_place",
+          "page": 39
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from occupancy to the profile field occupancy_rate; domain review should confirm they mean the same thing."
+    },
+    "loan_amount": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from modeled_loan_amount to the profile field loan_amount; domain review should confirm they mean the same thing."
+    },
+    "interest_rate": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from modeled_interest_rate to the profile field interest_rate; domain review should confirm they mean the same thing."
+    },
+    "loan_term_years": {
+      "locations": [
+        {
+          "document_id": "corporate_place",
+          "page": 5
+        }
+      ],
+      "review_note": "Subject property only; not sales comparables. Current source-stated metrics; modeled loan terms. Renamed from modeled_loan_term_years to the profile field loan_term_years; domain review should confirm they mean the same thing."
+    }
+  },
+  "townhomes": {
+    "units": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N8"
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "ltv": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N15"
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "loan_amount": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N17"
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "interest_rate": {
+      "locations": [
+        {
+          "document_id": "townhomes_model",
+          "sheet": "Sheet1",
+          "cell": "N19"
+        }
+      ],
+      "review_note": "Anonymous model, not verified actual transaction. Preserve negative cashflow."
+    },
+    "address": {
+      "locations": [],
+      "review_note": "No subject property address supplied in this workbook. Renamed from property_address to the profile field address; domain review should confirm they mean the same thing."
+    },
+    "sponsor_name": {
+      "locations": [],
+      "review_note": "No sponsor legal entity supplied in this workbook. Renamed from sponsor_legal_name to the profile field sponsor_name; domain review should confirm they mean the same thing."
+    }
+  }
+}

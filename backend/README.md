@@ -277,33 +277,32 @@ who/when audit trail).
 
 Automated tests (below) prove the code doesn't crash; they don't prove an extraction is
 *correct*. `backend/evaluation/` is a separate suite that scores actual extraction accuracy
-against known-correct answers, using the real Claude API:
+against known-correct answers, using the real extraction model.
+
+Since Milestones 1.4-1.5 that suite is a versioned benchmark of real deal packages: five deal
+families (Roderick, Opulent, Daly City for development; Chicago and Corporate Place reserved as
+unseen cases) plus a workbook diagnostic, with expected values and evidence pages stored apart
+from extraction output in `evaluation/benchmark_data/`. One command runs the production extractor
+against it and writes a report:
 
 ```powershell
-python -m backend.evaluation.evaluate            # ground-truth cases
-python -m backend.evaluation.evaluate --holdout  # unseen-deal cases
-python -m backend.evaluation.evaluate --all      # both, reported separately
+python -m backend.evaluation.restore_inputs --source-dir C:\path\to\deal\files   # once per checkout
+python -m backend.evaluation.evaluate --allow-draft --out backend/evaluation/reports/hana-dev
+python -m backend.evaluation.evaluate --allow-draft --compare backend/evaluation/reports/hana-dev/report.json
 ```
 
-- **`cases.py` → `GROUND_TRUTH_CASES`** - synthetic deal packages written by hand, each paired
-  with the known-correct value for every field the text states. Used while building and checking
-  the extractor's prompt.
-- **`cases.py` → `HOLDOUT_CASES`** - more synthetic deals, covering different property types and
-  different document formatting, that were never used while writing the prompt. These catch a
-  prompt that only works on the exact wording of the ground-truth cases instead of the general
-  rule it's supposed to follow.
-- **`evaluate.py`** - runs the real extractor against a set of cases and prints a per-field and
-  overall accuracy report. Costs a little to run (real API calls), so it's a script you run
-  manually, not part of the free `pytest` suite - though the scoring logic itself (is a numeric
-  answer within tolerance, is a string match case-insensitive, etc.) is covered by
-  `test_evaluate.py` with a fake client, so that part does run for free in CI.
+The report covers field accuracy, missing-field detection, unsupported (hallucinated) extraction
+rate, evidence-page correctness, latency, and approximate model cost. Every benchmark field is a
+field H9N's extractor produces (`evaluation/fields.py`), and `label_coverage` says how many of them
+are labelled. `--compare` shows what changed since an earlier run, so it can be rerun after any prompt or model change. The reserved
+cases need `--split holdout --unlock-holdout`; labels stay drafts (`--allow-draft`) until the domain
+team approves them through `review.csv`, which also lists the H9N fields each deal still needs an
+answer for. See [evaluation/README.md](evaluation/README.md) for restoring source files, domain
+review, pricing, thresholds, and replay.
 
-**Worth being honest about:** these are synthetic cases with hand-written "correct" answers, not
-real deals a person independently verified. They prove the extractor can read clearly-stated facts
-back correctly; they don't prove much about a real CIM's messier formatting, scanned/OCR'd text,
-or genuinely ambiguous wording. Real, human-reviewed deals should be added here (or replace these
-cases) as they become available - see `cases.py`'s module docstring for the full reasoning, and
-keep testing real documents by hand with `test_extractor.py` in the meantime.
+`cases.py`'s synthetic deals remain for `demo_end_to_end.py` and the free scoring tests
+(`test_evaluate.py`); they prove the extractor reads clearly-stated facts back correctly, not how it
+does on a real CIM.
 
 ## End-to-end demo
 
@@ -573,8 +572,10 @@ Things that aren't obvious:
 
 | Env var | Required? | Default | What it's for |
 |---|---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | — | Your Claude API key |
-| `H9N_EXTRACTION_MODEL` | No | `claude-sonnet-4-5-20250929` | Which Claude model to use (re-run the held-out evaluation after changing it) |
+| `H9N_EXTRACTION_PROVIDER` | No | `anthropic` | `anthropic` (direct Claude API) or `openrouter` (OpenRouter's Anthropic-compatible endpoint) |
+| `ANTHROPIC_API_KEY` | With `anthropic` | — | Your Claude API key |
+| `OPENROUTER_API_KEY` | With `openrouter` | — | Your OpenRouter key (also used by RAG embeddings) |
+| `H9N_EXTRACTION_MODEL` | No | `claude-sonnet-4-5-20250929` (`anthropic/claude-sonnet-4.5` on OpenRouter) | Which model to use; OpenRouter needs an `author/model` ID with tool calling (re-run the evaluation after changing it) |
 | `H9N_EXTRACTION_TIMEOUT_SECONDS` | No | `300` | Time budget for one whole extraction or correction, retries included (1-3600) |
 | `H9N_EXTRACTION_MAX_RETRIES` | No | `2` | How many times H9N retries a timeout, connection error, rate limit, or 5xx response (0-10) |
 | `H9N_EXTRACTION_MAX_INPUT_CHARS` | No | `600000` | Longest document text (roughly 150k tokens) sent in one extraction; longer packages get a 422 |

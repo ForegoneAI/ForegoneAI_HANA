@@ -1,0 +1,250 @@
+{
+  "dataset_version": "0.1.2-draft",
+  "cases": {
+    "roderick": {},
+    "opulent": {
+      "units": {
+        "status": "present",
+        "value": 108,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    },
+    "daly_city": {
+      "asking_price": {
+        "status": "present",
+        "value": 2100000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "square_feet": {
+        "status": "present",
+        "value": 5662,
+        "unit": "sqft",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "units": {
+        "status": "present",
+        "value": 4,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "year_built": {
+        "status": "present",
+        "value": 1965,
+        "unit": "year",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    },
+    "chicago": {
+      "units": {
+        "status": "present",
+        "value": 4,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "asking_price": {
+        "status": "present",
+        "value": 1700000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "cap_rate": {
+        "status": "present",
+        "value": 0.0587,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "noi": {
+        "status": "present",
+        "value": 99813,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "loan_amount": {
+        "status": "present",
+        "value": 1275000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "interest_rate": {
+        "status": "present",
+        "value": 0.0375,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "annual_revenue": {
+        "status": "present",
+        "value": 132600,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    },
+    "corporate_place": {
+      "asking_price": {
+        "status": "present",
+        "value": 26750000,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "cap_rate": {
+        "status": "present",
+        "value": 0.0603,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "noi": {
+        "status": "present",
+        "value": 1613150,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "square_feet": {
+        "status": "present",
+        "value": 68070,
+        "unit": "sqft",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "occupancy_rate": {
+        "status": "present",
+        "value": 0.9496,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "loan_amount": {
+        "status": "present",
+        "value": 17387500,
+        "unit": "USD",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "interest_rate": {
+        "status": "present",
+        "value": 0.0425,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "loan_term_years": {
+        "status": "present",
+        "value": 10,
+        "unit": "years",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    },
+    "townhomes": {
+      "units": {
+        "status": "present",
+        "value": 10,
+        "unit": "count",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "ltv": {
+        "status": "present",
+        "value": 0.7,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "loan_amount": {
+        "status": "present",
+        "value": 2450000,
+        "unit": "USD",
+        "abs_tolerance": 0.01,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "interest_rate": {
+        "status": "present",
+        "value": 0.065,
+        "unit": "ratio",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "address": {
+        "status": "missing",
+        "value": null,
+        "unit": "text",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      },
+      "sponsor_name": {
+        "status": "missing",
+        "value": null,
+        "unit": "text",
+        "abs_tolerance": 0,
+        "review_status": "pending_domain_review",
+        "reviewer": null,
+        "reviewed_at": null
+      }
+    }
+  }
+}
