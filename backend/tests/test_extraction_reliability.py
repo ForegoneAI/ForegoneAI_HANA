@@ -699,6 +699,7 @@ def test_reviewer_fields_always_start_at_their_defaults():
             "Asking Price: $10,000,000\nSenior loan: $12,000,000",
             id="ellipsis skips another number",
         ),
+        pytest.param("units", 250, "a 250-room hotel", "a 250-room hotel", id="rooms are not units"),
     ],
 )
 def test_a_wrong_number_is_not_verified(field_name, value, snippet, page_text):
@@ -733,6 +734,15 @@ def test_a_wrong_number_is_not_verified(field_name, value, snippet, page_text):
             "occupancy_rate", 94, "Physical Occupancy: 0.94", "Physical Occupancy: 0.94", id="fraction as percent"
         ),
         pytest.param("units", 128, "128 units on site", "128 units on site", id="units"),
+        pytest.param(
+            "units",
+            108,
+            "108 Keys Total",
+            "Program:\n35 Ultra-Luxury Villas\n33 Branded Residences\n40 Boutique Hotel Keys\n108 Keys Total",
+            id="hotel keys",
+        ),
+        pytest.param("units", 108, "a 108-key luxury resort", "a 108-key luxury resort", id="hotel keys, hyphenated"),
+        pytest.param("units", 40, "40 suites on site", "40 suites on site", id="suites"),
         pytest.param(
             "units", 128, "Units: 128", "Units: 128\nYear Built: 1998", id="label on the next line is not a unit"
         ),

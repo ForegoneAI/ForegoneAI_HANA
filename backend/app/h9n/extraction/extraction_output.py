@@ -420,6 +420,11 @@ _SCALES = {"k": 1e3, "thousand": 1e3, "m": 1e6, "mm": 1e6, "million": 1e6, "b": 
 _UNIT_WORDS = {
     "unit": "units",
     "units": "units",
+    # A hotel's keys are its units. Rooms are not: "rooms" can be rooms per
+    # apartment or meeting rooms. "Suites" is no unit word, so "40 suites"
+    # reads as a plain number, which already supports units.
+    "key": "units",
+    "keys": "units",
     "sf": "area",
     "rsf": "area",
     "nrsf": "area",
@@ -434,8 +439,6 @@ _UNIT_WORDS = {
     "acres": "other",
     "bed": "other",
     "beds": "other",
-    "key": "other",
-    "keys": "other",
     "room": "other",
     "rooms": "other",
     "space": "other",

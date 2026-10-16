@@ -87,7 +87,7 @@ its value: `"Units ... 400"`); for a numeric field the skipped text may not cont
 **How the value is matched to the quote:**
 - **Numbers** are read from the page itself, with their context: sign (`-$150,000`,
   `($150,000)`), scale (`$10.0M`, `950K`, `18.5 million`), `%`, `$`, and a unit word after them
-  (`128 units`, `85,000 SF`, `10-year`). The value must equal one of the quoted numbers exactly
+  (`128 units`, `108 keys`, `85,000 SF`, `10-year`). The value must equal one of the quoted numbers exactly
   (a percentage may also be a fraction: `0.94` supports 94), and the number must be the right kind
   for the field: an asking price can't come from "128 units", a cap rate can't come from "$6.5M".
 - **Text fields** must appear in the quoted passage as whole words, ignoring case and dashes
