@@ -777,6 +777,83 @@ def test_a_table_value_with_another_number_in_between_is_withheld_not_guessed():
     assert deal.withheld_values[0].reason == "snippet_not_on_page"
 
 
+# An offering-summary table as PDF text extraction lists it (Daly City OM,
+# p.3): every label first, then every value, one per line.
+COLUMN_TABLE_PAGE = (
+    "seeking reliable cash flow in a high-demand.\n"
+    "Asking Price:\nBuilding Size:\nLot Size:\nTypical Floor:\nNo. of Units:\nAvg. Unit Size:\nYear Built:\n"
+    "$2,100,000\n5,662 SF\n0.05 AC\n1,616 SF\n4\n1,408 SF\n1965\n"
+    "Zoning:\nR3, Daly City\nOFFERING SUMMARY"
+)
+
+
+def test_a_row_of_a_column_layout_table_is_verified_as_it_reads():
+    # The model quotes each row as the table reads, label then value.
+    deal = _enforce(
+        [_page(COLUMN_TABLE_PAGE, page_number=3)],
+        asking_price=2_100_000,
+        square_feet=5_662,
+        units=4,
+        year_built=1965,
+        evidence=[
+            evidence("asking_price", 2_100_000, "Asking Price: $2,100,000", page_number=3),
+            evidence("square_feet", 5_662, "Building Size: 5,662 SF", page_number=3),
+            evidence("units", 4, "No. of Units: 4", page_number=3),
+            evidence("year_built", 1965, "Year Built: 1965", page_number=3),
+        ],
+    )
+
+    assert deal.withheld_values == []
+    assert (deal.asking_price, deal.square_feet, deal.units, deal.year_built) == (2_100_000, 5_662, 4, 1965)
+    assert [e.verification for e in deal.evidence] == ["value_matched"] * 4
+    assert deal.possible_conflicts == []
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "snippet", "page_text"),
+    [
+        pytest.param("units", 1965, "No. of Units: 1965", COLUMN_TABLE_PAGE, id="another row's figure"),
+        pytest.param("units", 1965, "No. of Units: ... 1965", COLUMN_TABLE_PAGE, id="ellipsis across rows"),
+        # Each page below has a blank or wrapped cell, so pairing the i-th
+        # label with the i-th line after the labels would give the quoted,
+        # wrong pair.
+        pytest.param(
+            "units",
+            1965,
+            "Units: 1965",
+            "Asking Price:\nUnits:\nYear Built:\n$2,100,000\n1965\nZoning:\nR3",
+            id="blank cell, next label reached early",
+        ),
+        pytest.param(
+            "units",
+            1965,
+            "Units: 1965",
+            "Units:\nYear Built:\n1965\nOFFERING SUMMARY\nZoning:\nR3",
+            id="blank cell, filled by a heading",
+        ),
+        pytest.param(
+            "year_built",
+            2025,
+            "Year Built: 2025",
+            "Units:\nYear Built:\n4\n2025 Rent Roll\nOFFERING SUMMARY",
+            id="blank cell, filled by the next block",
+        ),
+        pytest.param(
+            "units",
+            2019,
+            "Units: 2019",
+            "Year Built:\nUnits:\n1965 (renovated\n2019)\n4\nZoning:",
+            id="value wrapped onto two lines",
+        ),
+    ],
+)
+def test_a_column_layout_table_that_could_be_misaligned_is_withheld(field_name, value, snippet, page_text):
+    deal = _one(field_name, value, snippet, page_text)
+
+    assert getattr(deal, field_name) is None
+    assert deal.withheld_values[0].reason == "snippet_not_on_page"
+
+
 @pytest.mark.parametrize(
     ("text", "numbers"),
     [

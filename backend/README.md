@@ -83,6 +83,12 @@ across a line are all tolerated. Letters and digits that touch in the quote must
 so "2400" can't be matched against "2" and "400" on separate lines, and a quote can't start or end
 mid-word. "..." may join pieces of a quote that are at most 150 characters apart (a table label and
 its value: `"Units ... 400"`); for a numeric field the skipped text may not contain another number.
+When PDF text lists a table's labels first and then its values (`Asking Price:` / `Year Built:` /
+`$2,100,000` / `1965`), a row quoted as it reads (`"Year Built: 1965"`) is matched by position:
+the i-th label goes with the i-th value. That pairing is only trusted when two or more `Label:`
+lines are followed by exactly as many lines that each hold a figure, and then by another `Label:`
+line or the end of the page; a blank cell, a wrapped value, or a text value breaks the pattern and
+the quote is withheld.
 
 **How the value is matched to the quote:**
 - **Numbers** are read from the page itself, with their context: sign (`-$150,000`,
@@ -632,8 +638,8 @@ the API, and an evaluation suite scored against known-correct (if currently synt
 doesn't yet:
 - normalize wording (property types, investment strategies, state abbreviations) - a reworded value
   is withheld for now; vocabularies belong to M1.4
-- tell which table column a value came from - a table quote that skips over another number is
-  withheld rather than guessed
+- tell which table column a value came from, beyond the column-layout tables described above - a
+  table quote that skips over another number is withheld rather than guessed
 - read scanned PDFs (no OCR) or packages longer than one extraction request
 - offer a reviewer-facing UI - correction only happens through the API directly for now
 - evaluate against real, human-reviewed deals - the ground-truth and holdout sets are synthetic

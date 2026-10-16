@@ -380,12 +380,48 @@ def _locate(parts: list[str], page: str, gap_allowed: Callable[[str], bool]) -> 
     return search(0, 0)
 
 
+def _paired_columns(page: str) -> str:
+    """The (normalized) page with each column-layout table put back into
+    rows. PDF text sometimes lists a table's labels first and then its values
+    ("asking price:\\nyear built:\\n$2,100,000\\n1965"); here the i-th label is
+    joined to the i-th value ("asking price: $2,100,000\\nyear built: 1965").
+    Only when the run can't be misaligned: two or more lines ending in ":",
+    then exactly as many lines that each hold a figure, then another such
+    label or the end of the page. A blank cell, a value wrapped onto two
+    lines, or a text value breaks that pattern, and the lines are left as
+    they are - so the quote is withheld rather than paired with the wrong
+    figure."""
+    lines = page.split("\n")
+    paired: list[str] = []
+    i = 0
+    while i < len(lines):
+        count = 0
+        while i + count < len(lines) and lines[i + count].endswith(":"):
+            count += 1
+        values = lines[i + count : i + 2 * count]
+        end = i + 2 * count
+        if (
+            count >= 2
+            and len(values) == count
+            and all(any(char.isdigit() for char in value) and not value.endswith(":") for value in values)
+            and (end == len(lines) or lines[end].endswith(":"))
+        ):
+            paired += [f"{label} {value}" for label, value in zip(lines[i : i + count], values)]
+            i = end
+        else:
+            paired += lines[i : i + max(count, 1)]
+            i += max(count, 1)
+    return "\n".join(paired)
+
+
 def _find_quote(
     snippet: str, page_text: str, *, numeric: bool = False
 ) -> Optional[tuple[str, list[tuple[int, int]]]]:
     """The normalized page the quote was found on and its spans there, or None.
     For a numeric field a "..." gap may not skip over another number - that's
-    how a label gets paired with the wrong figure."""
+    how a label gets paired with the wrong figure. Only if the quote isn't on
+    the page as written is it looked for with column-layout tables put back
+    into rows (see _paired_columns)."""
     parts = _quote_parts(snippet)
     if not parts:
         return None
@@ -395,14 +431,19 @@ def _find_quote(
         spans = _locate(parts, page, gap_allowed)
         if spans is not None:
             return page, spans
+    page = _paired_columns(page)
+    spans = _locate(parts, page, gap_allowed)
+    if spans is not None:
+        return page, spans
     return None
 
 
 def snippet_is_on_page(snippet: str, page_text: str) -> bool:
     """Whether `snippet` appears on the page, tolerating formatting noise:
     case, spacing and line breaks, curly quotes and dashes, ligatures,
-    invisible characters, a word hyphenated across a line, and "..." between
-    quoted pieces that are close together on the page."""
+    invisible characters, a word hyphenated across a line, "..." between
+    quoted pieces that are close together on the page, and a table row whose
+    labels and values PDF extraction listed as two columns."""
     return _find_quote(snippet, page_text) is not None
 
 
