@@ -13,18 +13,13 @@ from fastapi.testclient import TestClient
 from backend.app.h9n.extraction.extraction_output import VALUE_FIELDS, REPEExtractionOutput, enforce_integrity
 from backend.app.h9n.review.store import DealStore
 from backend.app.h9n.schemas.base_deal import (
+    BOOKKEEPING_FIELDS,
     ConflictingValue,
     FieldEvidence,
     PossibleConflict,
     WithheldValue,
 )
-from backend.app.h9n.schemas.field_status import (
-    BOOKKEEPING_FIELDS,
-    assess_field,
-    note_names_field,
-    note_text,
-    value_fields,
-)
+from backend.app.h9n.schemas.field_status import assess_field, note_names_field, note_text
 from backend.app.h9n.schemas.repe_deal import REPEDealProfile
 from backend.tests.extraction_fakes import evidence, full_output
 
@@ -279,7 +274,6 @@ def test_every_extracted_value_field_has_a_status_and_nothing_else_does():
     deal = REPEDealProfile()
 
     assert list(deal.field_statuses) == VALUE_FIELDS
-    assert value_fields(deal) == VALUE_FIELDS
     assert not BOOKKEEPING_FIELDS & set(deal.field_statuses)
 
 
@@ -408,12 +402,10 @@ def test_the_feedback_prompt_shows_the_profile_without_statuses():
 
 def test_bookkeeping_fields_are_defined_once_and_never_extracted():
     from backend.app.h9n.extraction import extraction_output
-    from backend.app.h9n.schemas import base_deal
 
     # field_status, the extractor and the profile all use the one list in
     # base_deal, so a bookkeeping field added there can't get a status or be
     # asked of the model by mistake.
-    assert BOOKKEEPING_FIELDS is base_deal.BOOKKEEPING_FIELDS
     assert set(VALUE_FIELDS) == set(REPEDealProfile.model_fields) - BOOKKEEPING_FIELDS
     assert extraction_output.NON_EXTRACTABLE_FIELDS == BOOKKEEPING_FIELDS - extraction_output._META_FIELDS
     assert "possible_conflicts" in extraction_output.NON_EXTRACTABLE_FIELDS

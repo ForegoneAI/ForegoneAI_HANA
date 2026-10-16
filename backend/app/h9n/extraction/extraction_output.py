@@ -793,12 +793,6 @@ class _Passage:
     page: dict[str, Any]
     text: str  # as on the page, so it can be quoted verbatim
     normalized: str
-    _numbers: Optional[list[_Number]] = None
-
-    def numbers(self) -> list[_Number]:
-        if self._numbers is None:
-            self._numbers = _numbers(self.normalized)
-        return self._numbers
 
 
 def _index_passages(pages: list[dict[str, Any]]) -> list[_Passage]:
@@ -844,7 +838,7 @@ def _labelled_value(field_name: str, label: str, passage: _Passage) -> Optional[
         if starts_clause and ends_word:
             gap_end = _LABEL_GAP.match(text, end).end()
             if gap_end - end <= 12:
-                following = [n for n in passage.numbers() if n.start >= gap_end]
+                following = [n for n in _numbers(text) if n.start >= gap_end]
                 first = following[0] if following else None
                 if first is not None and first.start == gap_end:
                     if _ambiguous_figure(field_name, text, first, following[1:]):
@@ -1016,13 +1010,6 @@ def _describe_conflict(value: Any, values: list[ConflictingValue], citation_prob
     )
 
 
-def _describe_possible_conflict(values: list[ConflictingValue]) -> str:
-    return (
-        f"The same label gives a different figure elsewhere in the document: {_listed(values)}. "
-        "It may be another section's figure (e.g. pro forma, or another loan); confirm which one this field holds."
-    )
-
-
 def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]]) -> REPEDealProfile:
     """Turns a validated extraction into a REPEDealProfile holding only verified values.
 
@@ -1095,12 +1082,13 @@ def enforce_integrity(output: REPEExtractionOutput, pages: list[dict[str, Any]])
             same_label = _same_label_passages(field_name, value, check.verified, passages)
             if same_label:
                 possible = own + same_label
+                detail = (
+                    f"The same label gives a different figure elsewhere in the document: {_listed(possible)}. "
+                    "It may be another section's figure (e.g. pro forma, or another loan); "
+                    "confirm which one this field holds."
+                )
                 possible_conflicts.append(
-                    PossibleConflict(
-                        field_name=field_name,
-                        detail=_describe_possible_conflict(possible),
-                        conflicting_values=possible,
-                    )
+                    PossibleConflict(field_name=field_name, detail=detail, conflicting_values=possible)
                 )
             continue
         else:

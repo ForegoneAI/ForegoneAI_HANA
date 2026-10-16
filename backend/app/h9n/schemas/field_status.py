@@ -72,16 +72,6 @@ FieldStatusReasonCode = Literal[
     "not_stated",  # no value and no note
 ]
 
-# Every field not in base_deal.BOOKKEEPING_FIELDS is a deal value and gets a
-# status. Re-exported here for callers that read statuses.
-__all__ = [
-    "BOOKKEEPING_FIELDS",
-    "FieldStatus",
-    "FieldStatusReport",
-    "assess_field",
-    "assess_fields",
-]
-
 _CONFLICT_REASONS = {"model_conflicting", "conflicting_evidence"}
 
 
@@ -133,19 +123,10 @@ def note_text(note: str, field_name: str) -> str:
     return stripped
 
 
-def value_fields(profile: "BaseDeal") -> list[str]:
-    """The deal value fields of a profile, in schema order."""
-    return [name for name in type(profile).model_fields if name not in BOOKKEEPING_FIELDS]
-
-
-def _has_value(value: Any) -> bool:
-    return value is not None and not (isinstance(value, str) and not value.strip())
-
-
 def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
     """The status of one deal value field, as the profile stands now."""
     value = getattr(profile, field_name)
-    has_value = _has_value(value)
+    has_value = value is not None and not (isinstance(value, str) and not value.strip())
     stored = [entry for entry in profile.evidence if entry.field_name == field_name]
     withheld: Optional[WithheldValue] = next(
         (entry for entry in profile.withheld_values if entry.field_name == field_name), None
@@ -261,4 +242,6 @@ def assess_field(profile: "BaseDeal", field_name: str) -> FieldStatusReport:
 
 def assess_fields(profile: "BaseDeal") -> dict[str, FieldStatusReport]:
     """Every deal value field's status, in schema order."""
-    return {name: assess_field(profile, name) for name in value_fields(profile)}
+    return {
+        name: assess_field(profile, name) for name in type(profile).model_fields if name not in BOOKKEEPING_FIELDS
+    }
